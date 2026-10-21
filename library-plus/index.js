@@ -125,6 +125,14 @@ function Page({ LP }) {
 	const uris = tracks.filter((tr) => tr.isPlayable).map((tr) => tr.uri);
 	const subset = filtered ? uris : undefined; // what the shuffles play
 	const ordered = filtered || SORTS[sort] ? uris : undefined; // what "in order" plays
+	const shelf = tab === "albums" ? albums : tab === "later" ? later : null;
+	// the buttons play what the open tab shows
+	const playTab = (mode) =>
+		!shelf
+			? LP.play(mode, mode === "order" ? ordered : subset)
+			: tab === "later" && !q && later.length
+				? LP.play(mode, undefined, undefined, "later") // the whole later playlist as it is
+				: LP.playAlbums(mode, shelf.map((a) => a.uri));
 
 	const header = h(
 		"header",
@@ -152,16 +160,16 @@ function Page({ LP }) {
 	const actions = h(
 		"div",
 		{ className: "lp-actions" },
-		h("button", { className: "lp-play", onClick: () => LP.play("order", ordered), title: t("playOrder"), "aria-label": t("playOrder") }, h(Icon, { name: "play", size: 24 })),
-		h(Btn, { icon: "shuffle", label: t("shuffle"), onClick: () => LP.play("shuffle", subset) }),
+		h("button", { className: "lp-play", onClick: () => playTab("order"), title: t("playOrder"), "aria-label": t("playOrder") }, h(Icon, { name: "play", size: 24 })),
+		h(Btn, { icon: "shuffle", label: t("shuffle"), onClick: () => playTab("shuffle") }),
 		h(Btn, {
 			icon: "enhance",
 			label: t("smart"),
-			title: filtered ? t("smartOff") : t("smartTitle"),
-			onClick: () => LP.play("smart"),
-			disabled: filtered || !data.canSmart,
+			title: t("smartTitle"),
+			onClick: () => playTab("smart"),
+			disabled: !data.canSmart,
 		}),
-		h(Btn, { icon: "shuffle", label: "Shuffle+", title: t("shufflePlusTitle"), onClick: () => LP.play("shuffle+", subset) }),
+		h(Btn, { icon: "shuffle", label: "Shuffle+", title: t("shufflePlusTitle"), onClick: () => playTab("shuffle+") }),
 		h(Btn, { icon: "playlist", title: t("openPlaylist"), onClick: () => go(data.playlist) }),
 		h(Btn, { icon: "repeat", title: t("syncNow"), onClick: () => LP.sync(), disabled: state.syncing }),
 		h("input", { className: "lp-search", type: "search", placeholder: t("search"), value: query, onChange: (e) => setQuery(e.target.value), "aria-label": t("search") })
@@ -233,12 +241,12 @@ function Page({ LP }) {
 		);
 	} else {
 		const isLater = tab === "later";
-		const list = isLater ? later : albums;
 		body = h(
 			"div",
 			{ className: "lp-grid" },
-			list.length === 0 && h("p", { className: "lp-muted" }, t(isLater ? "emptyLater" : "emptyAlbums")),
-			list.map((a) =>
+			shelf.length === 0 && h("p", { className: "lp-muted" }, t(isLater ? "emptyLater" : "emptyAlbums")),
+			shelf.length > 0 && h("p", { className: "lp-muted lp-hint" }, t("playsShelf", count(shelf.length, "albumsOf"))),
+			shelf.map((a) =>
 				h(AlbumCard, {
 					key: a.uri,
 					...a,

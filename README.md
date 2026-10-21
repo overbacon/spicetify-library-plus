@@ -14,7 +14,7 @@ Your whole Spotify library as one playlist.
   - sorting by date added, title, artist, album or duration;
   - right-click a track or album for Spotify's own menu.
 
-  With a filter or sorting on, the buttons play exactly what you see.
+  The buttons play what the open tab shows: the library, the filtered or sorted list, or the albums on a shelf. Smart Shuffle works everywhere too. A list that isn't a whole playlist is written into a third private playlist, “Library+ · Now Playing”, and played from there.
 - **Album shelves.** “Albums” = your saved albums; their tracks are part of the library. “Listen later” = albums put aside for later. They are not played with the library and live in a second private playlist, so you see them on your phone too. Right-click any album → “Library+: …”, or use the buttons on the cards.
 
 The interface is in English or Russian, depending on Spotify's language.
@@ -36,14 +36,13 @@ spicetify config custom_apps library-plus
 spicetify apply
 ```
 
-**Uninstall**: `spicetify config custom_apps library-plus-`, then `spicetify apply`. Delete the folder and, if you like, the two playlists.
+**Uninstall**: `spicetify config custom_apps library-plus-`, then `spicetify apply`. Delete the folder and, if you like, the three playlists.
 
 ## Notes
 
 - Local files from Liked Songs are skipped.
-- Smart Shuffle is Spotify's and works only on the whole playlist, not on a filtered list.
 - Library+ manages the playlist's contents. Tracks you add or remove by hand are put back at the next sync. Reordering is kept.
-- Requires Spicetify 2.x on a recent Spotify desktop client. Tested on Spotify 1.3.4 with Spicetify 2.45.
+- Requires Spicetify 2.x on a recent Spotify desktop client. Tested on Spotify 1.3.4 and 1.3.6 with Spicetify 2.45 and 2.46.
 
 ## Development
 
@@ -52,7 +51,7 @@ spicetify apply
 ---
 
 **По-русски.** Вся библиотека как один закрытый плейлист «Моя библиотека» (лайки + сохранённые альбомы, синхронизируется сам). На странице Library+ есть:
-- кнопки: по порядку / перемешать / умное перемешивание / Shuffle+;
+- кнопки: по порядку / перемешать / умное перемешивание / Shuffle+ — играют то, что открыто во вкладке;
 - поиск, фильтры настроений, сортировка, родное меню по правому клику;
 - полки альбомов «Альбомы» и «Послушать позже».
 

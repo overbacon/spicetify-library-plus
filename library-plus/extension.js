@@ -21,6 +21,8 @@ const LIBRARY_PLUS_STRINGS = {
 		libraryDesc: "Liked Songs + saved albums. Kept in sync by Library+, manual edits get overwritten.",
 		laterName: "Listen Later",
 		laterDesc: "Albums saved for later with Library+.",
+		nowName: "Library+ · Now Playing",
+		nowDesc: "What you last started in Library+ with a filter, sorting, an album shelf or Shuffle+. Rewritten every time.",
 		created: "Library+: created the playlist “{0}”",
 		createFailed: "could not create the playlist",
 		syncError: "Library+: sync error, {0}",
@@ -41,7 +43,6 @@ const LIBRARY_PLUS_STRINGS = {
 		shuffle: "Shuffle",
 		smart: "Smart Shuffle",
 		smartTitle: "Spotify's smart shuffle (adds recommendations)",
-		smartOff: "Smart Shuffle works on the whole playlist only. Clear the filter",
 		shufflePlusTitle: "True random shuffle, like Shuffle+",
 		openPlaylist: "Open playlist",
 		syncNow: "Sync now",
@@ -59,6 +60,7 @@ const LIBRARY_PLUS_STRINGS = {
 		picking: "Picking tracks…",
 		playsOnly: "The buttons above play only these {0}",
 		playsSorted: "“Play in order” follows this sorting",
+		playsShelf: "The buttons above play the tracks of {0}",
 		rowTitle: "Double-click to play from here, right-click for the menu",
 		more: "Show more ({0})",
 		playAlbum: "Play album",
@@ -74,6 +76,8 @@ const LIBRARY_PLUS_STRINGS = {
 		libraryDesc: "Лайки + сохранённые альбомы. Обновляется расширением Library+ сам — ручные правки перезапишутся.",
 		laterName: "Послушать позже",
 		laterDesc: "Альбомы, отложенные в Library+.",
+		nowName: "Library+ · Сейчас играет",
+		nowDesc: "То, что вы последним запустили в Library+ с фильтром, сортировкой, с полки альбомов или через Shuffle+. Перезаписывается каждый раз.",
 		created: "Library+: создан плейлист «{0}»",
 		createFailed: "не удалось создать плейлист",
 		syncError: "Library+: ошибка синхронизации — {0}",
@@ -94,7 +98,6 @@ const LIBRARY_PLUS_STRINGS = {
 		shuffle: "Перемешать",
 		smart: "Умное перемешивание",
 		smartTitle: "Умное перемешивание Spotify (добавляет рекомендации)",
-		smartOff: "Умное перемешивание работает только на весь плейлист — сбросьте фильтр",
 		shufflePlusTitle: "Честное случайное перемешивание, как в Shuffle+",
 		openPlaylist: "Открыть плейлист",
 		syncNow: "Синхронизировать сейчас",
@@ -112,6 +115,7 @@ const LIBRARY_PLUS_STRINGS = {
 		picking: "Подбираю треки…",
 		playsOnly: "Кнопки сверху играют только эти {0}",
 		playsSorted: "«Слушать по порядку» играет в этой сортировке",
+		playsShelf: "Кнопки сверху играют треки из {0}",
 		rowTitle: "Двойной клик — играть отсюда, правый клик — меню",
 		more: "Показать ещё ({0})",
 		playAlbum: "Слушать альбом",
@@ -134,7 +138,10 @@ const LIBRARY_PLUS_STRINGS = {
 	const P = S.Platform;
 	const lang = S.Locale.getLocale()?.startsWith("ru") ? "ru" : "en";
 	const t = (key, ...args) => (LIBRARY_PLUS_STRINGS[lang][key] ?? LIBRARY_PLUS_STRINGS.en[key]).replace(/\{(\d)\}/g, (_, i) => args[i]);
-	const FORMS = { en: { tracks: ["track", "tracks"], albums: ["album", "albums"] }, ru: { tracks: ["трек", "трека", "треков"], albums: ["альбом", "альбома", "альбомов"] } };
+	const FORMS = {
+		en: { tracks: ["track", "tracks"], albums: ["album", "albums"], albumsOf: ["album", "albums"] },
+		ru: { tracks: ["трек", "трека", "треков"], albums: ["альбом", "альбома", "альбомов"], albumsOf: ["альбома", "альбомов", "альбомов"] }, // albumsOf: after «из»
+	};
 	function count(n, what) {
 		const f = FORMS[lang][what];
 		const m10 = n % 10;
@@ -152,8 +159,9 @@ const LIBRARY_PLUS_STRINGS = {
 
 	// ---------- playlists ----------
 	const LISTS = {
-		library: { key: "library-plus:playlist", name: t("libraryName"), desc: t("libraryDesc") },
-		later: { key: "library-plus:later-playlist", name: t("laterName"), desc: t("laterDesc") },
+		library: { key: "library-plus:playlist", name: t("libraryName"), desc: t("libraryDesc"), at: { before: "start" } },
+		later: { key: "library-plus:later-playlist", name: t("laterName"), desc: t("laterDesc"), at: { before: "start" } },
+		now: { key: "library-plus:now-playlist", name: t("nowName"), desc: t("nowDesc"), at: { after: "end" } },
 	};
 	async function existing(kind) {
 		const uri = S.LocalStorage.get(LISTS[kind].key);
@@ -167,8 +175,8 @@ const LIBRARY_PLUS_STRINGS = {
 		return creating[kind];
 	}
 	async function create(kind) {
-		const { key, name, desc } = LISTS[kind];
-		const uri = await P.RootlistAPI.createPlaylist(name, { before: "start" });
+		const { key, name, desc, at } = LISTS[kind];
+		const uri = await P.RootlistAPI.createPlaylist(name, at);
 		if (!uri) throw new Error(t("createFailed"));
 		await P.RootlistAPI.setPublishedState(uri, false);
 		await keepPrivate(uri);
@@ -269,8 +277,10 @@ const LIBRARY_PLUS_STRINGS = {
 		// shortcut: new tracks go to the top (they are the newest); order drifts only if an old item reappears
 		await addTop(pl, add);
 
-		const laterPl = await existing("later");
-		if (laterPl) await keepPrivate(laterPl);
+		for (const kind of ["later", "now"]) {
+			const other = await existing(kind);
+			if (other) await keepPrivate(other);
+		}
 		const saved = new Set(albums.map((a) => a.uri));
 		for (const a of later) if (saved.has(a.uri)) await removeLater(a.uri); // saved since → it's in "Albums" now
 		return { added: add.length, removed: remove.length, total: want.length };
@@ -317,54 +327,47 @@ const LIBRARY_PLUS_STRINGS = {
 		return a;
 	}
 
-	// Same low-level queue trick Shuffle+ uses: replace the queue with exactly these tracks.
-	// Starts the playlist on list[0] first: updateContext can't switch the source anymore, and this way Spotify shows the playlist as it.
-	async function queue(list, context) {
-		if (!list.length) {
-			S.showNotification(t("nothing"), true);
-			return;
-		}
-		const API = P.PlayerAPI;
-		await P.ContextualShuffleAPI.setContextualShuffleMode(context, SHUFFLE_MODE.order); // keep our order
-		await API.play({ uri: context }, FEATURE, { skipTo: { uri: list[0] } });
-		for (let i = 0; i < 50 && API.getState()?.item?.uri !== list[0]; i++) await sleep(100);
-		await sleep(300); // let the queue revision catch up with the new track
-		const { _queue, _client } = API._queue;
-		await _client.setQueue({
-			nextTracks: [...list.slice(1), "spotify:delimiter"].map((uri) => ({
-				contextTrack: { uri, uid: "", metadata: { is_queued: "false" } },
-				removed: [],
-				blocked: [],
-				provider: "context",
-			})),
-			prevTracks: _queue.prevTracks,
-			queueRevision: _queue.queueRevision,
-		});
+	// Everything is played as a real playlist with Spotify's own modes. A given list (filter, sorting, album shelf)
+	// and Shuffle+'s order are first written into the private "Now playing" playlist. Rewriting it takes milliseconds,
+	// unlike Shuffle+'s queue trick, whose tracks stay queued even after you play something else.
+	async function setContents(pl, uris) {
+		await removeRows(pl, await contents(pl));
+		await P.PlaylistAPI.add(pl, uris, { after: "end" });
 	}
 
-	// mode: order | shuffle | smart | shuffle+. uris: optional list (filtered / sorted). from: start from this track.
-	async function play(mode, uris, from) {
+	// mode: order | shuffle | smart | shuffle+. uris: optional list to play. from: start from this track.
+	// kind: the playlist to play when no list is given ("library" or "later").
+	async function play(mode, uris, from, kind = "library") {
 		try {
-			const pl = await ensure("library");
-			if (!uris && mode !== "shuffle+") {
-				// play() applies the saved per-playlist mode; ShuffleAPI.setShuffle doesn't save it while the playlist is playing
-				await P.ContextualShuffleAPI.setContextualShuffleMode(pl, SHUFFLE_MODE[mode]);
-				// an explicit start track: without it Spotify just keeps going if this playlist is already playing
-				const playable = (await getTracks()).filter((tr) => tr.isPlayable);
-				const start = from ?? playable[mode === "order" ? 0 : Math.floor(Math.random() * playable.length)]?.uri;
-				await P.PlayerAPI.play({ uri: pl }, FEATURE, start ? { skipTo: { uri: start } } : {});
-				if (mode === "smart") {
-					// smart shuffle only turns on through ShuffleAPI once the playlist is the playing context
-					for (let i = 0; i < 50 && P.PlayerAPI.getState()?.context?.uri !== pl; i++) await sleep(100);
-					await P.ShuffleAPI.setShuffle(pl, SHUFFLE_MODE.smart);
+			let pl = await ensure(kind);
+			if (uris || mode === "shuffle+") {
+				let list = uris ?? (await contents(pl)).filter((tr) => tr.isPlayable).map((tr) => tr.uri);
+				if (!list.length) {
+					S.showNotification(t("nothing"), true);
+					return;
 				}
-				return;
+				if (mode === "shuffle+") {
+					list = shuffle([...list]);
+					mode = "order";
+					S.showNotification(t("shuffled", count(list.length, "tracks")));
+				}
+				const fresh = !(await existing("now"));
+				pl = await ensure("now");
+				await setContents(pl, list);
+				// shortcut: the player can't resolve a playlist created a moment ago; only the very first run waits
+				if (fresh) await sleep(2500);
 			}
-			let list = uris ?? (await getTracks()).filter((tr) => tr.isPlayable).map((tr) => tr.uri);
-			if (mode === "order") list = from ? list.slice(Math.max(0, list.indexOf(from))) : list;
-			else list = shuffle([...list]); // a subset can't use Spotify's smart shuffle, so it gets the true shuffle
-			await queue(list, pl);
-			if (mode === "shuffle+") S.showNotification(t("shuffled", count(list.length, "tracks")));
+			// play() applies the saved per-playlist mode; ShuffleAPI.setShuffle doesn't save it while the playlist is playing
+			await P.ContextualShuffleAPI.setContextualShuffleMode(pl, SHUFFLE_MODE[mode]);
+			// an explicit start track: without it Spotify just keeps going if this playlist is already playing
+			const playable = (await contents(pl)).filter((tr) => tr.isPlayable);
+			const start = from ?? playable[mode === "order" ? 0 : Math.floor(Math.random() * playable.length)]?.uri;
+			await P.PlayerAPI.play({ uri: pl }, FEATURE, start ? { skipTo: { uri: start } } : {});
+			if (mode === "smart") {
+				// smart shuffle only turns on through ShuffleAPI once the playlist is the playing context
+				for (let i = 0; i < 50 && P.PlayerAPI.getState()?.context?.uri !== pl; i++) await sleep(100);
+				await P.ShuffleAPI.setShuffle(pl, SHUFFLE_MODE.smart);
+			}
 		} catch (e) {
 			console.error("Library+ play", e);
 			S.showNotification(`Library+: ${e?.message ?? e}`, true);
@@ -372,6 +375,15 @@ const LIBRARY_PLUS_STRINGS = {
 	}
 
 	const playUri = (uri) => P.PlayerAPI.play({ uri }, FEATURE, {});
+
+	// Album shelves: play the tracks of these albums (shelf order, then album order)
+	async function playAlbums(mode, albumUris) {
+		try {
+			await play(mode, (await Promise.all(albumUris.map(albumTracks))).flat());
+		} catch (e) {
+			S.showNotification(`Library+: ${e?.message ?? e}`, true);
+		}
+	}
 
 	// ---------- data for the page ----------
 	const getTracks = async () => contents(await ensure("library"));
@@ -402,6 +414,7 @@ const LIBRARY_PLUS_STRINGS = {
 			getTags().catch(() => []),
 			P.SmartShuffleEligibilityAPI.getEligibility(pl).catch(() => ({})),
 		]);
+		// all three playlists are the user's own, so the library's answer stands for them
 		return { playlist: pl, tracks, albums, later, tags, canSmart: !!elig.canSmartShuffle };
 	}
 
@@ -422,6 +435,6 @@ const LIBRARY_PLUS_STRINGS = {
 	libEvents.addListener("operation_complete", scheduleSync); // like / unlike / save album here
 	libEvents.addListener("update", scheduleSync); // changes from other devices
 
-	window.LibraryPlus = { events, state, t, count, lang, sync, play, playUri, load, moodUris, toLater, toAlbums, removeAlbum, removeLater };
+	window.LibraryPlus = { events, state, t, count, lang, sync, play, playUri, playAlbums, load, moodUris, toLater, toAlbums, removeAlbum, removeLater };
 	setTimeout(() => migrateLater().catch((e) => console.error("Library+ migrate", e)).finally(sync), 5000);
 })();
