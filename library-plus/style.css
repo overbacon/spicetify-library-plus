@@ -1,0 +1,273 @@
+/* Colors come from the active Spicetify theme (--spice-*), so the page matches whatever theme is applied. */
+.lp-page {
+	padding: 32px 32px 64px;
+	color: var(--spice-text);
+}
+.lp-muted {
+	color: var(--spice-subtext);
+}
+.lp-error {
+	color: var(--spice-notification-error, #e22134);
+}
+
+.lp-header {
+	display: flex;
+	align-items: flex-end;
+	gap: 24px;
+	margin-bottom: 24px;
+}
+.lp-cover {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 160px;
+	height: 160px;
+	border-radius: 6px;
+	background: var(--spice-button);
+	color: var(--spice-main);
+	box-shadow: 0 8px 24px rgba(var(--spice-rgb-shadow, 0, 0, 0), 0.5);
+}
+.lp-kicker {
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+}
+.lp-header h1 {
+	margin: 4px 0 8px;
+	font-size: 56px;
+	line-height: 1.05;
+	font-weight: 900;
+}
+
+.lp-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 20px;
+}
+.lp-play {
+	display: grid;
+	place-items: center;
+	width: 56px;
+	height: 56px;
+	border: 0;
+	border-radius: 50%;
+	background: var(--spice-button);
+	color: var(--spice-main);
+	cursor: pointer;
+	transition: transform 0.1s ease;
+}
+.lp-play:hover {
+	transform: scale(1.05);
+}
+.lp-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 32px;
+	padding: 4px 14px;
+	border: 1px solid rgba(var(--spice-rgb-subtext), 0.5);
+	border-radius: 500px;
+	background: transparent;
+	color: var(--spice-text);
+	font: inherit;
+	font-size: 14px;
+	cursor: pointer;
+}
+.lp-btn:hover:not(:disabled),
+.lp-btn:focus-visible {
+	border-color: var(--spice-text);
+}
+.lp-btn:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+.lp-search {
+	margin-left: auto;
+	width: 280px;
+	max-width: 100%;
+	padding: 8px 12px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: rgba(var(--spice-rgb-text), 0.1);
+	color: var(--spice-text);
+	font: inherit;
+}
+.lp-search:focus {
+	outline: none;
+	border-color: var(--spice-text);
+}
+
+.lp-tabs,
+.lp-moods {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 16px;
+}
+.lp-chip {
+	padding: 6px 14px;
+	border: 0;
+	border-radius: 500px;
+	background: rgba(var(--spice-rgb-text), 0.1);
+	color: var(--spice-text);
+	font: inherit;
+	font-size: 14px;
+	cursor: pointer;
+}
+.lp-chip.small {
+	padding: 4px 12px;
+	font-size: 13px;
+}
+.lp-chip:hover {
+	background: rgba(var(--spice-rgb-text), 0.2);
+}
+.lp-chip.is-active {
+	background: var(--spice-text);
+	color: var(--spice-main);
+}
+.lp-hint {
+	margin: -4px 0 12px;
+	font-size: 13px;
+}
+
+.lp-row {
+	display: grid;
+	grid-template-columns: 32px 40px minmax(0, 2fr) minmax(0, 1fr) 48px;
+	align-items: center;
+	gap: 12px;
+	padding: 6px 8px;
+	border-radius: 4px;
+	cursor: default;
+	user-select: none;
+}
+.lp-row:hover,
+.lp-row:focus-visible {
+	background: rgba(var(--spice-rgb-text), 0.1);
+	outline: none;
+}
+.lp-row.is-disabled {
+	opacity: 0.4;
+}
+.lp-row img {
+	width: 40px;
+	height: 40px;
+	border-radius: 2px;
+	object-fit: cover;
+}
+.lp-num,
+.lp-dur {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	color: var(--spice-subtext);
+}
+.lp-title {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+.lp-title span,
+.lp-link {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+.lp-title span:last-child {
+	font-size: 13px;
+}
+.lp-link {
+	justify-self: start;
+	max-width: 100%;
+	padding: 0;
+	border: 0;
+	background: none;
+	font: inherit;
+	font-size: 14px;
+	text-align: left;
+	cursor: pointer;
+}
+.lp-link:hover {
+	color: var(--spice-text);
+	text-decoration: underline;
+}
+.lp-more {
+	margin-top: 16px;
+}
+
+.lp-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: 24px;
+}
+.lp-grid > p {
+	grid-column: 1 / -1;
+}
+.lp-card {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+	padding: 12px;
+	border-radius: 8px;
+	background: rgba(var(--spice-rgb-text), 0.05);
+}
+.lp-card:hover {
+	background: rgba(var(--spice-rgb-text), 0.1);
+}
+.lp-card img {
+	width: 100%;
+	aspect-ratio: 1;
+	margin-bottom: 8px;
+	border-radius: 4px;
+	object-fit: cover;
+	cursor: pointer;
+}
+.lp-card-name {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--spice-text);
+	font: inherit;
+	font-weight: 700;
+	text-align: left;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	cursor: pointer;
+}
+.lp-card-artist {
+	color: var(--spice-subtext);
+	font-size: 13px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+.lp-card-actions {
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+}
+.lp-card-actions .lp-btn {
+	padding: 4px 8px;
+}
+
+.lp-sort {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	margin-left: auto;
+	font-size: 14px;
+}
+.lp-sort select {
+	padding: 4px 8px;
+	border: 0;
+	border-radius: 4px;
+	background: rgba(var(--spice-rgb-text), 0.1);
+	color: var(--spice-text);
+	font: inherit;
+}
+.lp-sort option {
+	background: var(--spice-main);
+}

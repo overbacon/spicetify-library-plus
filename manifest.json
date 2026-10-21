@@ -1,0 +1,9 @@
+{
+  "name": "Library+",
+  "description": "Your whole library as one playlist: play, shuffle, Smart Shuffle and Shuffle+ over Liked Songs + saved albums, with search, Spotify's mood filters and a Listen Later shelf for albums.",
+  "preview": "preview.png",
+  "readme": "README.md",
+  "branch": "main",
+  "authors": [{ "name": "overbacon", "url": "https://github.com/overbacon" }],
+  "tags": ["library", "playlist", "shuffle", "albums"]
+}
