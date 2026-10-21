@@ -12,6 +12,7 @@ Your whole Spotify library as one playlist.
   - search across tracks and albums;
   - **mood filters**: Spotify's Liked Songs chips (Rock, Chill, Sad…) applied to the whole library;
   - sorting by date added, title, artist, album or duration;
+  - **No Liked Songs** toggle: hides your liked tracks and skips them on every tab, so you hear only what you haven't liked yet. It stays on until you switch it off;
   - right-click a track or album for Spotify's own menu.
 
   The buttons play what the open tab shows: the library, the filtered or sorted list, or the albums on a shelf. Smart Shuffle works everywhere too. A list that isn't a whole playlist is written into a third private playlist, “Library+ · Now Playing”, and played from there.
@@ -53,6 +54,7 @@ spicetify apply
 **По-русски.** Вся библиотека как один закрытый плейлист «Моя библиотека» (лайки + сохранённые альбомы, синхронизируется сам). На странице Library+ есть:
 - кнопки: по порядку / перемешать / умное перемешивание / Shuffle+ — играют то, что открыто во вкладке;
 - поиск, фильтры настроений, сортировка, родное меню по правому клику;
+- переключатель «Без любимых»: лайкнутые треки скрыты и не играют ни на одной вкладке;
 - полки альбомов «Альбомы» и «Послушать позже».
 
 Установка на Windows — команда выше.

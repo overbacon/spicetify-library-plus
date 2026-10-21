@@ -61,6 +61,9 @@ const LIBRARY_PLUS_STRINGS = {
 		playsOnly: "The buttons above play only these {0}",
 		playsSorted: "“Play in order” follows this sorting",
 		playsShelf: "The buttons above play the tracks of {0}",
+		exceptLiked: ", except Liked Songs",
+		noLiked: "No Liked Songs",
+		noLikedTitle: "Hide Liked Songs and don't play them, on every tab",
 		rowTitle: "Double-click to play from here, right-click for the menu",
 		more: "Show more ({0})",
 		playAlbum: "Play album",
@@ -116,6 +119,9 @@ const LIBRARY_PLUS_STRINGS = {
 		playsOnly: "Кнопки сверху играют только эти {0}",
 		playsSorted: "«Слушать по порядку» играет в этой сортировке",
 		playsShelf: "Кнопки сверху играют треки из {0}",
+		exceptLiked: ", кроме любимых",
+		noLiked: "Без любимых",
+		noLikedTitle: "Скрыть любимые треки и не играть их — на всех вкладках",
 		rowTitle: "Двойной клик — играть отсюда, правый клик — меню",
 		more: "Показать ещё ({0})",
 		playAlbum: "Слушать альбом",
@@ -190,9 +196,10 @@ const LIBRARY_PLUS_STRINGS = {
 		if ((await P.PlaylistPermissionsAPI.getBasePermission(uri)) !== "BLOCKED") await P.PlaylistPermissionsAPI.setBasePermission(uri, "BLOCKED");
 	}
 	const contents = async (uri) => (await P.PlaylistAPI.getContents(uri, { limit: 99999 })).items;
+	const SILENT = { silent: true }; // no "Added to …" toast for our own background writes
 	async function addTop(pl, uris) {
 		// last chunk first, each before "start", so the final order matches `uris`
-		for (let i = Math.floor((uris.length - 1) / 100) * 100; i >= 0; i -= 100) await P.PlaylistAPI.add(pl, uris.slice(i, i + 100), { before: "start" });
+		for (let i = Math.floor((uris.length - 1) / 100) * 100; i >= 0; i -= 100) await P.PlaylistAPI.add(pl, uris.slice(i, i + 100), { before: "start" }, SILENT);
 	}
 	async function removeRows(pl, rows) {
 		for (let i = 0; i < rows.length; i += 100) await P.PlaylistAPI.remove(pl, rows.slice(i, i + 100).map(({ uri, uid }) => ({ uri, uid })));
@@ -332,7 +339,7 @@ const LIBRARY_PLUS_STRINGS = {
 	// unlike Shuffle+'s queue trick, whose tracks stay queued even after you play something else.
 	async function setContents(pl, uris) {
 		await removeRows(pl, await contents(pl));
-		await P.PlaylistAPI.add(pl, uris, { after: "end" });
+		await P.PlaylistAPI.add(pl, uris, { after: "end" }, SILENT);
 	}
 
 	// mode: order | shuffle | smart | shuffle+. uris: optional list to play. from: start from this track.
@@ -376,10 +383,11 @@ const LIBRARY_PLUS_STRINGS = {
 
 	const playUri = (uri) => P.PlayerAPI.play({ uri }, FEATURE, {});
 
-	// Album shelves: play the tracks of these albums (shelf order, then album order)
-	async function playAlbums(mode, albumUris) {
+	// Album shelves: play the tracks of these albums (shelf order, then album order), minus the `skip` set
+	async function playAlbums(mode, albumUris, skip) {
 		try {
-			await play(mode, (await Promise.all(albumUris.map(albumTracks))).flat());
+			const uris = (await Promise.all(albumUris.map(albumTracks))).flat();
+			await play(mode, skip ? uris.filter((uri) => !skip.has(uri)) : uris);
 		} catch (e) {
 			S.showNotification(`Library+: ${e?.message ?? e}`, true);
 		}
@@ -407,15 +415,16 @@ const LIBRARY_PLUS_STRINGS = {
 
 	async function load() {
 		const pl = await ensure("library");
-		const [tracks, albums, later, tags, elig] = await Promise.all([
+		const [tracks, albums, later, tags, elig, liked] = await Promise.all([
 			getTracks(),
 			getAlbums(),
 			getLater(),
 			getTags().catch(() => []),
 			P.SmartShuffleEligibilityAPI.getEligibility(pl).catch(() => ({})),
+			P.LibraryAPI.getTracks({ limit: 99999 }),
 		]);
 		// all three playlists are the user's own, so the library's answer stands for them
-		return { playlist: pl, tracks, albums, later, tags, canSmart: !!elig.canSmartShuffle };
+		return { playlist: pl, tracks, albums, later, tags, canSmart: !!elig.canSmartShuffle, liked: new Set(liked.items.map((tr) => tr.uri)) };
 	}
 
 	// ---------- context menu ----------

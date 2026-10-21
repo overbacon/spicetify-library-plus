@@ -24,10 +24,10 @@ function Icon({ name, size = 16 }) {
 	return h("svg", { width: size, height: size, viewBox: "0 0 16 16", fill: "currentColor", dangerouslySetInnerHTML: { __html: Spicetify.SVGIcons[name] ?? "" } });
 }
 
-function Btn({ icon, label, title, onClick, disabled, className = "" }) {
+function Btn({ icon, label, title, onClick, disabled, pressed, className = "" }) {
 	return h(
 		"button",
-		{ className: `lp-btn ${className}`, onClick, disabled, title: title ?? label, "aria-label": label ?? title },
+		{ className: `lp-btn ${pressed ? "is-active" : ""} ${className}`, onClick, disabled, title: title ?? label, "aria-label": label ?? title, "aria-pressed": pressed },
 		icon && h(Icon, { name: icon }),
 		label && h("span", null, label)
 	);
@@ -88,6 +88,11 @@ function Page({ LP }) {
 	const [moodSet, setMoodSet] = useState(null);
 	const [sort, setSort] = useState("added");
 	const [limit, setLimit] = useState(200);
+	const [noLiked, setNoLiked] = useState(() => Spicetify.LocalStorage.get("library-plus:no-liked") === "1");
+	const toggleNoLiked = () => {
+		Spicetify.LocalStorage.set("library-plus:no-liked", noLiked ? "0" : "1");
+		setNoLiked(!noLiked);
+	};
 
 	useEffect(() => {
 		const f = () => setVer((v) => v + 1);
@@ -117,11 +122,14 @@ function Page({ LP }) {
 
 	const q = query.trim().toLowerCase();
 	const match = (...s) => !q || s.some((x) => x?.toLowerCase().includes(q));
-	let tracks = data.tracks.filter((tr) => (!mood || moodSet?.has(tr.uri)) && match(tr.name, tr.album?.name, ...(tr.artists ?? []).map((a) => a.name)));
+	const skip = noLiked ? data.liked : null; // liked tracks hidden and not played while "No Liked Songs" is on
+	let tracks = data.tracks.filter(
+		(tr) => !skip?.has(tr.uri) && (!mood || moodSet?.has(tr.uri)) && match(tr.name, tr.album?.name, ...(tr.artists ?? []).map((a) => a.name))
+	);
 	if (SORTS[sort]) tracks = [...tracks].sort(SORTS[sort]);
 	const albums = data.albums.filter((a) => match(a.name, ...(a.artists ?? []).map((x) => x.name)));
 	const later = data.later.filter((a) => match(a.name, ...(a.artists ?? []).map((x) => x.name)));
-	const filtered = !!(mood || q);
+	const filtered = !!(mood || q || skip);
 	const uris = tracks.filter((tr) => tr.isPlayable).map((tr) => tr.uri);
 	const subset = filtered ? uris : undefined; // what the shuffles play
 	const ordered = filtered || SORTS[sort] ? uris : undefined; // what "in order" plays
@@ -130,9 +138,9 @@ function Page({ LP }) {
 	const playTab = (mode) =>
 		!shelf
 			? LP.play(mode, mode === "order" ? ordered : subset)
-			: tab === "later" && !q && later.length
+			: tab === "later" && !q && !skip && later.length
 				? LP.play(mode, undefined, undefined, "later") // the whole later playlist as it is
-				: LP.playAlbums(mode, shelf.map((a) => a.uri));
+				: LP.playAlbums(mode, shelf.map((a) => a.uri), skip);
 
 	const header = h(
 		"header",
@@ -172,6 +180,7 @@ function Page({ LP }) {
 		h(Btn, { icon: "shuffle", label: "Shuffle+", title: t("shufflePlusTitle"), onClick: () => playTab("shuffle+") }),
 		h(Btn, { icon: "playlist", title: t("openPlaylist"), onClick: () => go(data.playlist) }),
 		h(Btn, { icon: "repeat", title: t("syncNow"), onClick: () => LP.sync(), disabled: state.syncing }),
+		h(Btn, { icon: "heart", label: t("noLiked"), title: t("noLikedTitle"), onClick: toggleNoLiked, pressed: noLiked, className: "lp-push" }),
 		h("input", { className: "lp-search", type: "search", placeholder: t("search"), value: query, onChange: (e) => setQuery(e.target.value), "aria-label": t("search") })
 	);
 
@@ -245,7 +254,7 @@ function Page({ LP }) {
 			"div",
 			{ className: "lp-grid" },
 			shelf.length === 0 && h("p", { className: "lp-muted" }, t(isLater ? "emptyLater" : "emptyAlbums")),
-			shelf.length > 0 && h("p", { className: "lp-muted lp-hint" }, t("playsShelf", count(shelf.length, "albumsOf"))),
+			shelf.length > 0 && h("p", { className: "lp-muted lp-hint" }, t("playsShelf", count(shelf.length, "albumsOf")) + (skip ? t("exceptLiked") : "")),
 			shelf.map((a) =>
 				h(AlbumCard, {
 					key: a.uri,

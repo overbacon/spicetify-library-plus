@@ -271,3 +271,15 @@
 .lp-sort option {
 	background: var(--spice-main);
 }
+
+.lp-btn.is-active {
+	border-color: var(--spice-text);
+	background: var(--spice-text);
+	color: var(--spice-main);
+}
+.lp-push {
+	margin-left: auto;
+}
+.lp-push + .lp-search {
+	margin-left: 0;
+}
