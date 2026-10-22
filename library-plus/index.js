@@ -18,7 +18,31 @@ const SORTS = {
 	album: (a, b) => cmp(a.album?.name, b.album?.name),
 	duration: (a, b) => (a.duration?.milliseconds ?? 0) - (b.duration?.milliseconds ?? 0),
 };
+const ALBUM_SORTS = {
+	added: null, // newest first
+	name: (a, b) => cmp(a.name, b.name),
+	artist: (a, b) => cmp(names(a.artists), names(b.artists)) || cmp(a.name, b.name),
+};
 const SORT_LABEL = { added: "sortAdded", name: "sortName", artist: "sortArtist", album: "sortAlbum", duration: "sortDuration" };
+
+// useState that survives leaving the page (Spotify unmounts it)
+function usePersisted(key, initial) {
+	const [value, setValue] = useState(() => Spicetify.LocalStorage.get(`library-plus:${key}`) ?? initial);
+	const set = (v) => {
+		Spicetify.LocalStorage.set(`library-plus:${key}`, v);
+		setValue(v);
+	};
+	return [value, set];
+}
+
+function SortSelect({ t, value, onChange, sorts }) {
+	return h(
+		"label",
+		{ className: "lp-sort lp-muted" },
+		t("sort"),
+		h("select", { value, onChange: (e) => onChange(e.target.value) }, Object.keys(sorts).map((k) => h("option", { key: k, value: k }, t(SORT_LABEL[k]))))
+	);
+}
 
 function Icon({ name, size = 16 }) {
 	return h("svg", { width: size, height: size, viewBox: "0 0 16 16", fill: "currentColor", dangerouslySetInnerHTML: { __html: Spicetify.SVGIcons[name] ?? "" } });
@@ -86,13 +110,11 @@ function Page({ LP }) {
 	const [query, setQuery] = useState("");
 	const [mood, setMood] = useState(null);
 	const [moodSet, setMoodSet] = useState(null);
-	const [sort, setSort] = useState("added");
+	const [sort, setSort] = usePersisted("sort", "added");
+	const [albumSort, setAlbumSort] = usePersisted("album-sort", "added");
 	const [limit, setLimit] = useState(200);
-	const [noLiked, setNoLiked] = useState(() => Spicetify.LocalStorage.get("library-plus:no-liked") === "1");
-	const toggleNoLiked = () => {
-		Spicetify.LocalStorage.set("library-plus:no-liked", noLiked ? "0" : "1");
-		setNoLiked(!noLiked);
-	};
+	const [noLikedFlag, setNoLikedFlag] = usePersisted("no-liked", "0");
+	const noLiked = noLikedFlag === "1";
 
 	useEffect(() => {
 		const f = () => setVer((v) => v + 1);
@@ -127,8 +149,12 @@ function Page({ LP }) {
 		(tr) => !skip?.has(tr.uri) && (!mood || moodSet?.has(tr.uri)) && match(tr.name, tr.album?.name, ...(tr.artists ?? []).map((a) => a.name))
 	);
 	if (SORTS[sort]) tracks = [...tracks].sort(SORTS[sort]);
-	const albums = data.albums.filter((a) => match(a.name, ...(a.artists ?? []).map((x) => x.name)));
-	const later = data.later.filter((a) => match(a.name, ...(a.artists ?? []).map((x) => x.name)));
+	const shelfOf = (list) => {
+		const out = list.filter((a) => match(a.name, ...(a.artists ?? []).map((x) => x.name)));
+		return ALBUM_SORTS[albumSort] ? out.sort(ALBUM_SORTS[albumSort]) : out;
+	};
+	const albums = shelfOf(data.albums);
+	const later = shelfOf(data.later);
 	const filtered = !!(mood || q || skip);
 	const uris = tracks.filter((tr) => tr.isPlayable).map((tr) => tr.uri);
 	const subset = filtered ? uris : undefined; // what the shuffles play
@@ -138,7 +164,7 @@ function Page({ LP }) {
 	const playTab = (mode) =>
 		!shelf
 			? LP.play(mode, mode === "order" ? ordered : subset)
-			: tab === "later" && !q && !skip && later.length
+			: tab === "later" && !q && !skip && !ALBUM_SORTS[albumSort] && later.length
 				? LP.play(mode, undefined, undefined, "later") // the whole later playlist as it is
 				: LP.playAlbums(mode, shelf.map((a) => a.uri), skip);
 
@@ -180,7 +206,7 @@ function Page({ LP }) {
 		h(Btn, { icon: "shuffle", label: "Shuffle+", title: t("shufflePlusTitle"), onClick: () => playTab("shuffle+") }),
 		h(Btn, { icon: "playlist", title: t("openPlaylist"), onClick: () => go(data.playlist) }),
 		h(Btn, { icon: "repeat", title: t("syncNow"), onClick: () => LP.sync(), disabled: state.syncing }),
-		h(Btn, { icon: "heart", label: t("noLiked"), title: t("noLikedTitle"), onClick: toggleNoLiked, pressed: noLiked, className: "lp-push" }),
+		h(Btn, { icon: "heart", label: t("noLiked"), title: t("noLikedTitle"), onClick: () => setNoLikedFlag(noLiked ? "0" : "1"), pressed: noLiked, className: "lp-push" }),
 		h("input", { className: "lp-search", type: "search", placeholder: t("search"), value: query, onChange: (e) => setQuery(e.target.value), "aria-label": t("search") })
 	);
 
@@ -203,12 +229,8 @@ function Page({ LP }) {
 			data.tags.map((m) =>
 				h("button", { key: m.tag, className: `lp-chip small ${mood?.tag === m.tag ? "is-active" : ""}`, "aria-pressed": mood?.tag === m.tag, onClick: () => setMood(mood?.tag === m.tag ? null : m) }, m.name)
 			),
-			h(
-				"label",
-				{ className: "lp-sort lp-muted" },
-				t("sort"),
-				h("select", { value: sort, onChange: (e) => setSort(e.target.value) }, Object.keys(SORTS).map((k) => h("option", { key: k, value: k }, t(SORT_LABEL[k]))))
-			)
+			data.excluded > 0 && h(Btn, { icon: "x", label: t("restoreExcluded", data.excluded), onClick: () => LP.restoreExcluded() }),
+			h(SortSelect, { t, value: sort, onChange: setSort, sorts: SORTS })
 		);
 		const hint =
 			ordered &&
@@ -236,7 +258,21 @@ function Page({ LP }) {
 						h("img", { src: img(tr.album?.images, "small"), alt: "", loading: "lazy" }),
 						h("div", { className: "lp-title" }, h("span", null, tr.name), h("span", { className: "lp-muted" }, names(tr.artists))),
 						h("button", { className: "lp-link lp-muted", onClick: () => tr.album && go(tr.album.uri) }, tr.album?.name),
-						h("span", { className: "lp-muted lp-dur" }, time(tr.duration?.milliseconds))
+						h("span", { className: "lp-muted lp-dur" }, time(tr.duration?.milliseconds)),
+						// album tracks only: a liked track leaves through Spotify's own "Remove from Liked Songs"
+						data.liked.has(tr.uri)
+							? h("span")
+							: h(
+									"button",
+									{
+										className: "lp-row-x",
+										title: t("excludeTrack"),
+										"aria-label": t("excludeTrack"),
+										onClick: (e) => (e.stopPropagation(), LP.excludeTrack(tr.uri)),
+										onDoubleClick: (e) => e.stopPropagation(),
+									},
+									h(Icon, { name: "x" })
+								)
 					),
 			})
 		);
@@ -251,24 +287,33 @@ function Page({ LP }) {
 	} else {
 		const isLater = tab === "later";
 		body = h(
-			"div",
-			{ className: "lp-grid" },
-			shelf.length === 0 && h("p", { className: "lp-muted" }, t(isLater ? "emptyLater" : "emptyAlbums")),
-			shelf.length > 0 && h("p", { className: "lp-muted lp-hint" }, t("playsShelf", count(shelf.length, "albumsOf")) + (skip ? t("exceptLiked") : "")),
-			shelf.map((a) =>
-				h(AlbumCard, {
-					key: a.uri,
-					...a,
-					actions: [
-						h(Btn, { key: "p", icon: "play", title: t("playAlbum"), onClick: () => LP.playUri(a.uri) }),
-						isLater
-							? h(Btn, { key: "m", icon: "plus-alt", title: t("toAlbums"), onClick: () => LP.toAlbums(a.uri) })
-							: h(Btn, { key: "m", icon: "clock", title: t("toLater"), onClick: () => LP.toLater(a.uri) }),
-						isLater
-							? h(Btn, { key: "x", icon: "x", title: t("removeLater"), onClick: () => LP.removeLater(a.uri) })
-							: h(Btn, { key: "x", icon: "x", title: t("removeFromLibrary"), onClick: () => LP.removeAlbum(a.uri) }),
-					],
-				})
+			React.Fragment,
+			null,
+			h(
+				"div",
+				{ className: "lp-moods" },
+				h("span", { className: "lp-muted" }, shelf.length ? t("playsShelf", count(shelf.length, "albumsOf")) + (skip ? t("exceptLiked") : "") : t(isLater ? "emptyLater" : "emptyAlbums")),
+				h(SortSelect, { t, value: albumSort, onChange: setAlbumSort, sorts: ALBUM_SORTS })
+			),
+			h(
+				"div",
+				{ className: "lp-grid" },
+				shelf.map((a) =>
+					h(AlbumCard, {
+						key: a.uri,
+						...a,
+						actions: isLater
+							? [
+									h(Btn, { key: "p", icon: "play", title: t("playAlbum"), onClick: () => LP.playUri(a.uri) }),
+									h(Btn, { key: "m", icon: "plus-alt", title: t("toAlbums"), onClick: () => LP.toAlbums(a.uri) }),
+									h(Btn, { key: "x", icon: "x", title: t("removeLater"), onClick: () => LP.removeLater(a.uri) }),
+								]
+							: [
+									h(Btn, { key: "p", icon: "play", title: t("playAlbum"), onClick: () => LP.playUri(a.uri) }),
+									h(Btn, { key: "x", icon: "x", title: t("removeFromLibrary"), onClick: () => LP.removeAlbum(a.uri) }),
+								],
+					})
+				)
 			)
 		);
 	}

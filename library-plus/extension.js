@@ -67,10 +67,11 @@ const LIBRARY_PLUS_STRINGS = {
 		rowTitle: "Double-click to play from here, right-click for the menu",
 		more: "Show more ({0})",
 		playAlbum: "Play album",
-		toLater: "Move to “Listen later”",
 		removeFromLibrary: "Remove from library",
 		toAlbums: "Move to “Albums” (save to library)",
 		removeLater: "Remove from “Listen later”",
+		excludeTrack: "Remove this album track from the library",
+		restoreExcluded: "Bring back removed tracks ({0})",
 		emptyAlbums: "No albums yet. Right-click an album → “Library+: add to Albums”, or press its heart.",
 		emptyLater: "Empty. Right-click any album → “Library+: listen later”.",
 	},
@@ -125,10 +126,11 @@ const LIBRARY_PLUS_STRINGS = {
 		rowTitle: "Двойной клик — играть отсюда, правый клик — меню",
 		more: "Показать ещё ({0})",
 		playAlbum: "Слушать альбом",
-		toLater: "Перенести в «Послушать позже»",
 		removeFromLibrary: "Убрать из библиотеки",
 		toAlbums: "Перенести в «Альбомы» (сохранить в библиотеку)",
 		removeLater: "Убрать из «Послушать позже»",
+		excludeTrack: "Убрать этот трек альбома из библиотеки",
+		restoreExcluded: "Вернуть убранные треки ({0})",
 		emptyAlbums: "Нет альбомов. ПКМ по альбому → «Library+: в «Альбомы»» или сердечко.",
 		emptyLater: "Пусто. ПКМ по любому альбому → «Library+: послушать позже».",
 	},
@@ -205,6 +207,23 @@ const LIBRARY_PLUS_STRINGS = {
 		for (let i = 0; i < rows.length; i += 100) await P.PlaylistAPI.remove(pl, rows.slice(i, i + 100).map(({ uri, uid }) => ({ uri, uid })));
 	}
 
+	// Album tracks the user removed from the library one by one.
+	// shortcut: kept on this computer only (only this computer's Library+ syncs); move to the account if that changes
+	const KEY_EXCLUDED = "library-plus:excluded";
+	function getExcluded() {
+		try {
+			return new Set(JSON.parse(S.LocalStorage.get(KEY_EXCLUDED)) ?? []);
+		} catch {
+			return new Set();
+		}
+	}
+	function setExcluded(set) {
+		S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify([...set]));
+		sync();
+	}
+	const excludeTrack = (uri) => setExcluded(getExcluded().add(uri));
+	const restoreExcluded = () => setExcluded(new Set());
+
 	const getAlbums = async () =>
 		(await P.LibraryAPI.getContents({ filters: ["0"], limit: 9999 })).items
 			.filter((i) => i.type === "album")
@@ -272,9 +291,10 @@ const LIBRARY_PLUS_STRINGS = {
 		const [liked, albums, later] = await Promise.all([P.LibraryAPI.getTracks({ limit: 99999 }), getAlbums(), getLater()]);
 		// shortcut: local files are skipped, Spotify playlists can't hold them reliably
 		const rows = liked.items.filter((tr) => !tr.isLocal).map((tr) => ({ uri: tr.uri, t: Date.parse(tr.addedAt), i: 0 }));
+		const excluded = getExcluded(); // only album tracks; a liked track stays through its like
 		for (const a of albums) {
 			const at = Date.parse(a.addedAt);
-			(await albumTracks(a.uri)).forEach((uri, i) => rows.push({ uri, t: at, i }));
+			(await albumTracks(a.uri)).forEach((uri, i) => excluded.has(uri) || rows.push({ uri, t: at, i }));
 		}
 		rows.sort((a, b) => b.t - a.t || a.i - b.i); // newest first, album tracks in album order
 		const want = [...new Set(rows.map((r) => r.uri))];
@@ -337,6 +357,28 @@ const LIBRARY_PLUS_STRINGS = {
 	// Everything is played as a real playlist with Spotify's own modes. A given list (filter, sorting, album shelf)
 	// and Shuffle+'s order are first written into the private "Now playing" playlist. Rewriting it takes milliseconds,
 	// unlike Shuffle+'s queue trick, whose tracks stay queued even after you play something else.
+	// "Now playing" is rewritten on every play. With the sidebar sorted by Recents it would jump and change its
+	// mosaic cover each time, so once per playlist: a fixed cover in the theme's colors, and a pin after the user's pins.
+	async function dressNow(uri) {
+		const KEY = "library-plus:now-dressed";
+		if (S.LocalStorage.get(KEY) === uri) return;
+		const css = getComputedStyle(document.documentElement);
+		const c = document.createElement("canvas");
+		c.width = c.height = 300;
+		const g = c.getContext("2d");
+		g.fillStyle = css.getPropertyValue("--spice-button").trim() || "#1db954";
+		g.fillRect(0, 0, 300, 300);
+		g.setTransform(300 / 40, 0, 0, 300 / 40, (300 / 40) * 8, (300 / 40) * 8); // the 24-unit icon, centered
+		g.strokeStyle = css.getPropertyValue("--spice-main").trim() || "#121212";
+		g.lineWidth = 2;
+		g.lineCap = "round";
+		g.stroke(new Path2D("M4 3v18M9 3v18M14 4l5 16"));
+		const jpeg = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.9));
+		await P.PlaylistAPI.updateDetails(uri, { imageUploadToken: await P.PlaylistAPI.uploadImage(jpeg) });
+		await P.LibraryAPI.pin(uri).catch((e) => console.warn("Library+ pin", e)); // Spotify limits the number of pins
+		S.LocalStorage.set(KEY, uri);
+	}
+
 	async function setContents(pl, uris) {
 		await removeRows(pl, await contents(pl));
 		await P.PlaylistAPI.add(pl, uris, { after: "end" }, SILENT);
@@ -360,6 +402,7 @@ const LIBRARY_PLUS_STRINGS = {
 				}
 				const fresh = !(await existing("now"));
 				pl = await ensure("now");
+				await dressNow(pl).catch((e) => console.warn("Library+ now-playlist cover/pin", e));
 				await setContents(pl, list);
 				// shortcut: the player can't resolve a playlist created a moment ago; only the very first run waits
 				if (fresh) await sleep(2500);
@@ -386,8 +429,9 @@ const LIBRARY_PLUS_STRINGS = {
 	// Album shelves: play the tracks of these albums (shelf order, then album order), minus the `skip` set
 	async function playAlbums(mode, albumUris, skip) {
 		try {
-			const uris = (await Promise.all(albumUris.map(albumTracks))).flat();
-			await play(mode, skip ? uris.filter((uri) => !skip.has(uri)) : uris);
+			const excluded = getExcluded();
+			const uris = (await Promise.all(albumUris.map(albumTracks))).flat().filter((uri) => !excluded.has(uri) && !skip?.has(uri));
+			await play(mode, uris);
 		} catch (e) {
 			S.showNotification(`Library+: ${e?.message ?? e}`, true);
 		}
@@ -424,7 +468,16 @@ const LIBRARY_PLUS_STRINGS = {
 			P.LibraryAPI.getTracks({ limit: 99999 }),
 		]);
 		// all three playlists are the user's own, so the library's answer stands for them
-		return { playlist: pl, tracks, albums, later, tags, canSmart: !!elig.canSmartShuffle, liked: new Set(liked.items.map((tr) => tr.uri)) };
+		return {
+			playlist: pl,
+			tracks,
+			albums,
+			later,
+			tags,
+			canSmart: !!elig.canSmartShuffle,
+			liked: new Set(liked.items.map((tr) => tr.uri)),
+			excluded: getExcluded().size,
+		};
 	}
 
 	// ---------- context menu ----------
@@ -444,6 +497,24 @@ const LIBRARY_PLUS_STRINGS = {
 	libEvents.addListener("operation_complete", scheduleSync); // like / unlike / save album here
 	libEvents.addListener("update", scheduleSync); // changes from other devices
 
-	window.LibraryPlus = { events, state, t, count, lang, sync, play, playUri, playAlbums, load, moodUris, toLater, toAlbums, removeAlbum, removeLater };
+	window.LibraryPlus = {
+		events,
+		state,
+		t,
+		count,
+		lang,
+		sync,
+		play,
+		playUri,
+		playAlbums,
+		load,
+		moodUris,
+		toLater,
+		toAlbums,
+		removeAlbum,
+		removeLater,
+		excludeTrack,
+		restoreExcluded,
+	};
 	setTimeout(() => migrateLater().catch((e) => console.error("Library+ migrate", e)).finally(sync), 5000);
 })();

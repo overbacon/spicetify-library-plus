@@ -135,7 +135,7 @@
 
 .lp-row {
 	display: grid;
-	grid-template-columns: 32px 40px minmax(0, 2fr) minmax(0, 1fr) 48px;
+	grid-template-columns: 32px 40px minmax(0, 2fr) minmax(0, 1fr) 48px 32px;
 	align-items: center;
 	gap: 12px;
 	padding: 6px 8px;
@@ -282,4 +282,26 @@
 }
 .lp-push + .lp-search {
 	margin-left: 0;
+}
+
+.lp-row-x {
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: none;
+	color: var(--spice-subtext);
+	cursor: pointer;
+	opacity: 0;
+}
+.lp-row:hover .lp-row-x,
+.lp-row-x:focus-visible {
+	opacity: 1;
+}
+.lp-row-x:hover {
+	color: var(--spice-text);
+	background: rgba(var(--spice-rgb-text), 0.1);
 }
