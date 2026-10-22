@@ -191,13 +191,20 @@ const LIBRARY_PLUS_STRINGS = {
 		later: { key: "library-plus:later-playlist", name: t("laterName"), desc: t("laterDesc"), at: { before: "start" } },
 		now: { key: "library-plus:now-playlist", name: t("nowName"), desc: t("nowDesc"), at: { after: "end" } },
 	};
-	async function existing(kind) {
+	// The rootlist check can take seconds, so a confirmed playlist is trusted until the next sync checks again
+	// (sync runs on every library change, deleting a playlist included).
+	const confirmed = new Set();
+	async function existing(kind, fresh) {
 		const uri = S.LocalStorage.get(LISTS[kind].key);
-		return uri && (await P.RootlistAPI.contains([uri]))[0] ? uri : null;
+		if (!uri) return null;
+		if (!fresh && confirmed.has(uri)) return uri;
+		const ok = (await P.RootlistAPI.contains([uri]))[0];
+		ok ? confirmed.add(uri) : confirmed.delete(uri);
+		return ok ? uri : null;
 	}
 	const creating = {};
-	async function ensure(kind) {
-		const uri = await existing(kind);
+	async function ensure(kind, fresh) {
+		const uri = await existing(kind, fresh);
 		if (uri) return uri;
 		creating[kind] ??= create(kind).finally(() => delete creating[kind]);
 		return creating[kind];
@@ -217,14 +224,25 @@ const LIBRARY_PLUS_STRINGS = {
 	async function keepPrivate(uri) {
 		if ((await P.PlaylistPermissionsAPI.getBasePermission(uri)) !== "BLOCKED") await P.PlaylistPermissionsAPI.setBasePermission(uri, "BLOCKED");
 	}
-	const contents = async (uri) => (await P.PlaylistAPI.getContents(uri, { limit: 99999 })).items;
-	const SILENT = { silent: true }; // no "Added to …" toast for our own background writes
-	async function addTop(pl, uris) {
-		// last chunk first, each before "start", so the final order matches `uris`
-		for (let i = Math.floor((uris.length - 1) / 100) * 100; i >= 0; i -= 100) await P.PlaylistAPI.add(pl, uris.slice(i, i + 100), { before: "start" }, SILENT);
+	// Reading a 1300-track playlist takes 0.7–6 s, and play() needs one before every start. So reads are cached:
+	// our own writes drop the entry, and sync (which also runs on changes made in Spotify) always reads fresh.
+	const contentsCache = new Map();
+	function contents(uri, fresh) {
+		if (fresh || !contentsCache.has(uri)) {
+			const read = P.PlaylistAPI.getContents(uri, { limit: 99999 }).then((r) => r.items);
+			read.catch(() => contentsCache.delete(uri));
+			contentsCache.set(uri, read);
+		}
+		return contentsCache.get(uri);
 	}
-	// one request: each one waits for the server, and Spotify takes 1300+ rows at once
+	const SILENT = { silent: true }; // no "Added to …" toast for our own background writes
+	// One request each: every request waits for the server, and Spotify takes 1300+ rows at once.
+	async function addTop(pl, uris) {
+		contentsCache.delete(pl);
+		if (uris.length) await P.PlaylistAPI.add(pl, uris, { before: "start" }, SILENT);
+	}
 	async function removeRows(pl, rows) {
+		contentsCache.delete(pl);
 		if (rows.length) await P.PlaylistAPI.remove(pl, rows.map(({ uri, uid }) => ({ uri, uid })));
 	}
 
@@ -317,7 +335,7 @@ const LIBRARY_PLUS_STRINGS = {
 
 	// ---------- library sync ----------
 	async function doSync() {
-		const pl = await ensure("library");
+		const pl = await ensure("library", true);
 		await keepPrivate(pl);
 		const [liked, albums, later] = await Promise.all([P.LibraryAPI.getTracks({ limit: 99999 }), getAlbums(), getLater()]);
 		// shortcut: local files are skipped, Spotify playlists can't hold them reliably
@@ -329,7 +347,7 @@ const LIBRARY_PLUS_STRINGS = {
 		rows.sort((a, b) => b.t - a.t || a.i - b.i); // newest first, album tracks in album order
 		const wanted = [...new Set(rows.map((r) => r.uri))];
 
-		const have = await contents(pl);
+		const have = await contents(pl, true);
 		const excluded = getExcluded();
 		const prev = readJSON(KEY_SNAPSHOT, null);
 		const byHand = libraryPlusRemovedByHand(wanted, have, prev, excluded);
@@ -342,10 +360,10 @@ const LIBRARY_PLUS_STRINGS = {
 		await removeRows(pl, remove);
 		// shortcut: new tracks go to the top (they are the newest); order drifts only if an old item reappears
 		await addTop(pl, add);
-		S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(Object.fromEntries((await contents(pl)).map((tr) => [tr.uri, label(tr)]))));
+		S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(Object.fromEntries((await contents(pl, true)).map((tr) => [tr.uri, label(tr)]))));
 
 		for (const kind of ["later", "now"]) {
-			const other = await existing(kind);
+			const other = await existing(kind, true);
 			if (other) await keepPrivate(other);
 		}
 		const saved = new Set(albums.map((a) => a.uri));
@@ -420,8 +438,9 @@ const LIBRARY_PLUS_STRINGS = {
 	}
 
 	async function setContents(pl, uris) {
-		await removeRows(pl, await contents(pl));
+		await removeRows(pl, await contents(pl)); // cached rows are safe here: only Library+ writes this playlist
 		await P.PlaylistAPI.add(pl, uris, { after: "end" }, SILENT);
+		contentsCache.delete(pl);
 	}
 
 	// mode: order | shuffle | smart | shuffle+. uris: optional list to play. from: start from this track.
@@ -453,9 +472,9 @@ const LIBRARY_PLUS_STRINGS = {
 				}
 			}
 			// play() applies the saved per-playlist mode; ShuffleAPI.setShuffle doesn't save it while the playlist is playing
-			await P.ContextualShuffleAPI.setContextualShuffleMode(pl, SHUFFLE_MODE[mode]);
 			// an explicit start track: without it Spotify just keeps going if this playlist is already playing
-			const playable = (await contents(pl)).filter((tr) => tr.isPlayable);
+			const [, rows] = await Promise.all([P.ContextualShuffleAPI.setContextualShuffleMode(pl, SHUFFLE_MODE[mode]), contents(pl)]);
+			const playable = rows.filter((tr) => tr.isPlayable);
 			const start = from ?? playable[mode === "order" ? 0 : Math.floor(Math.random() * playable.length)]?.uri;
 			await P.PlayerAPI.play({ uri: pl }, FEATURE, start ? { skipTo: { uri: start } } : {});
 			if (mode === "smart") {
