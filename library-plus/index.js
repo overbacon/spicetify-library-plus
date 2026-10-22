@@ -73,32 +73,68 @@ class Boundary extends React.Component {
 
 // Right-click → Spotify's native track / album menu (with items other extensions added, Shuffle+ included).
 // render(onContextMenu, ref) builds the trigger element.
-function NativeMenu({ menu, props, render }) {
+// menu: a ready menu element (Spotify's TrackMenu / AlbumMenu, or our own built from its Menu parts).
+function NativeMenu({ menu, render }) {
 	const { RightClickMenu } = Spicetify.ReactComponent;
-	const Menu = Spicetify.ReactComponent[menu];
 	const plain = render(undefined, undefined);
-	if (!RightClickMenu || !Menu) return plain;
+	if (!RightClickMenu || !menu) return plain;
+	return h(Boundary, { fallback: plain }, h(RightClickMenu, { menu: h(Boundary, { fallback: null }, menu) }, (isOpen, onContextMenu, ref) => render(onContextMenu, ref)));
+}
+
+// Spotify's own menu for an album of the later shelf would lack our actions (Spicetify only adds extension items to
+// menus Spotify opens itself), so this one is built from Spotify's Menu parts and looks the same.
+function LaterMenu({ LP, uri }) {
+	const { Menu, MenuItem } = Spicetify.ReactComponent;
+	const { t } = LP;
 	return h(
-		Boundary,
-		{ fallback: plain },
-		h(RightClickMenu, { menu: h(Boundary, { fallback: null }, h(Menu, props)) }, (isOpen, onContextMenu, ref) => render(onContextMenu, ref))
+		Menu,
+		null,
+		h(MenuItem, { onClick: () => LP.playUri(uri) }, t("playAlbum")),
+		h(MenuItem, { onClick: () => LP.toAlbums(uri) }, t("toAlbums")),
+		h(MenuItem, { onClick: () => LP.removeLater(uri) }, t("removeLater")),
+		h(MenuItem, { onClick: () => go(uri) }, t("openAlbum"))
 	);
 }
 
-function AlbumCard({ uri, name, artists, images, actions }) {
+// Spotify-style album tile: cover, title, "Single • artist". No buttons; click opens it, right-click for the menu.
+function AlbumCard({ t, LP, later, uri, name, artists, images, albumType }) {
+	const kind = albumType === "single" ? `${t("single")} • ` : albumType === "ep" ? "EP • " : "";
+	const { AlbumMenu, Menu, MenuItem } = Spicetify.ReactComponent;
 	return h(NativeMenu, {
-		menu: "AlbumMenu",
-		props: { uri, artistUri: artists?.[0]?.uri },
+		menu: later ? Menu && MenuItem && h(LaterMenu, { LP, uri }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: artists?.[0]?.uri }),
 		render: (onContextMenu, ref) =>
 			h(
 				"div",
-				{ className: "lp-card", onContextMenu, ref },
-				h("img", { src: img(images, "standard"), alt: "", loading: "lazy", onClick: () => go(uri) }),
-				h("button", { className: "lp-card-name", onClick: () => go(uri), title: name }, name),
-				h("div", { className: "lp-card-artist", title: names(artists) }, names(artists)),
-				h("div", { className: "lp-card-actions" }, actions)
+				{ className: "lp-card", onContextMenu, ref, role: "link", tabIndex: 0, onClick: () => go(uri), onKeyDown: (e) => e.key === "Enter" && go(uri) },
+				h("img", { src: img(images, "standard"), alt: "", loading: "lazy" }),
+				h("div", { className: "lp-card-name", title: name }, name),
+				h("div", { className: "lp-card-artist", title: kind + names(artists) }, kind + names(artists))
 			),
 	});
+}
+
+// The "Removed tracks" list, opened from the small "Removed: N" link.
+function RemovedList({ LP }) {
+	const { t } = LP;
+	const [items, setItems] = useState(LP.getRemoved);
+	const back = (uris) => {
+		LP.restoreTracks(uris);
+		setItems(items.filter((it) => !uris.includes(it.uri)));
+	};
+	return h(
+		"div",
+		{ className: "lp-removed" },
+		h("p", { className: "lp-muted" }, t("removedHint")),
+		items.map((it) =>
+			h(
+				"div",
+				{ key: it.uri, className: "lp-removed-row" },
+				h("span", null, it.name || it.uri),
+				h(Btn, { label: t("bringBack"), onClick: () => back([it.uri]) })
+			)
+		),
+		items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => back(items.map((it) => it.uri)), className: "lp-more" })
+	);
 }
 
 function Page({ LP }) {
@@ -229,8 +265,16 @@ function Page({ LP }) {
 			data.tags.map((m) =>
 				h("button", { key: m.tag, className: `lp-chip small ${mood?.tag === m.tag ? "is-active" : ""}`, "aria-pressed": mood?.tag === m.tag, onClick: () => setMood(mood?.tag === m.tag ? null : m) }, m.name)
 			),
-			data.excluded > 0 && h(Btn, { icon: "x", label: t("restoreExcluded", data.excluded), onClick: () => LP.restoreExcluded() }),
-			h(SortSelect, { t, value: sort, onChange: setSort, sorts: SORTS })
+			h(SortSelect, { t, value: sort, onChange: setSort, sorts: SORTS }),
+			data.removedCount > 0 &&
+				h(
+					"button",
+					{
+						className: "lp-link lp-muted lp-removed-link",
+						onClick: () => Spicetify.PopupModal.display({ title: t("removedTitle"), content: h(RemovedList, { LP }), isLarge: true }),
+					},
+					t("removedLink", data.removedCount)
+				)
 		);
 		const hint =
 			ordered &&
@@ -238,9 +282,10 @@ function Page({ LP }) {
 		const rows = tracks.slice(0, limit).map((tr, i) =>
 			h(NativeMenu, {
 				key: tr.uid || tr.uri,
-				menu: "TrackMenu",
 				// saveTrackUri unlocks "Add to playlist" / "Save to Liked Songs"; no uid, so no "Remove" (sync would undo it)
-				props: { uri: tr.uri, saveTrackUri: tr.uri, artists: tr.artists, albumUri: tr.album?.uri },
+				menu:
+					Spicetify.ReactComponent.TrackMenu &&
+					h(Spicetify.ReactComponent.TrackMenu, { uri: tr.uri, saveTrackUri: tr.uri, artists: tr.artists, albumUri: tr.album?.uri }),
 				render: (onContextMenu, ref) =>
 					h(
 						"div",
@@ -259,20 +304,17 @@ function Page({ LP }) {
 						h("div", { className: "lp-title" }, h("span", null, tr.name), h("span", { className: "lp-muted" }, names(tr.artists))),
 						h("button", { className: "lp-link lp-muted", onClick: () => tr.album && go(tr.album.uri) }, tr.album?.name),
 						h("span", { className: "lp-muted lp-dur" }, time(tr.duration?.milliseconds)),
-						// album tracks only: a liked track leaves through Spotify's own "Remove from Liked Songs"
-						data.liked.has(tr.uri)
-							? h("span")
-							: h(
-									"button",
-									{
-										className: "lp-row-x",
-										title: t("excludeTrack"),
-										"aria-label": t("excludeTrack"),
-										onClick: (e) => (e.stopPropagation(), LP.excludeTrack(tr.uri)),
-										onDoubleClick: (e) => e.stopPropagation(),
-									},
-									h(Icon, { name: "x" })
-								)
+						h(
+							"button",
+							{
+								className: "lp-row-x",
+								title: t("excludeTrack"),
+								"aria-label": t("excludeTrack"),
+								onClick: (e) => (e.stopPropagation(), LP.excludeTrack(tr)),
+								onDoubleClick: (e) => e.stopPropagation(),
+							},
+							h(Icon, { name: "x" })
+						)
 					),
 			})
 		);
@@ -285,35 +327,19 @@ function Page({ LP }) {
 			tracks.length > limit && h(Btn, { label: t("more", tracks.length - limit), onClick: () => setLimit(limit + 200), className: "lp-more" })
 		);
 	} else {
-		const isLater = tab === "later";
 		body = h(
 			React.Fragment,
 			null,
 			h(
 				"div",
 				{ className: "lp-moods" },
-				h("span", { className: "lp-muted" }, shelf.length ? t("playsShelf", count(shelf.length, "albumsOf")) + (skip ? t("exceptLiked") : "") : t(isLater ? "emptyLater" : "emptyAlbums")),
+				h("span", { className: "lp-muted" }, shelf.length ? t("playsShelf", count(shelf.length, "albumsOf")) + (skip ? t("exceptLiked") : "") : t(tab === "later" ? "emptyLater" : "emptyAlbums")),
 				h(SortSelect, { t, value: albumSort, onChange: setAlbumSort, sorts: ALBUM_SORTS })
 			),
 			h(
 				"div",
 				{ className: "lp-grid" },
-				shelf.map((a) =>
-					h(AlbumCard, {
-						key: a.uri,
-						...a,
-						actions: isLater
-							? [
-									h(Btn, { key: "p", icon: "play", title: t("playAlbum"), onClick: () => LP.playUri(a.uri) }),
-									h(Btn, { key: "m", icon: "plus-alt", title: t("toAlbums"), onClick: () => LP.toAlbums(a.uri) }),
-									h(Btn, { key: "x", icon: "x", title: t("removeLater"), onClick: () => LP.removeLater(a.uri) }),
-								]
-							: [
-									h(Btn, { key: "p", icon: "play", title: t("playAlbum"), onClick: () => LP.playUri(a.uri) }),
-									h(Btn, { key: "x", icon: "x", title: t("removeFromLibrary"), onClick: () => LP.removeAlbum(a.uri) }),
-								],
-					})
-				)
+				shelf.map((a) => h(AlbumCard, { key: a.uri, t, LP, later: tab === "later", ...a }))
 			)
 		);
 	}

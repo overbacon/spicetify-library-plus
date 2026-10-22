@@ -196,61 +196,50 @@
 	margin-top: 16px;
 }
 
+/* Spotify-style album tiles: no box until hover, cover with a soft shadow, two text lines */
 .lp-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-	gap: 24px;
-}
-.lp-grid > p {
-	grid-column: 1 / -1;
+	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+	margin: 0 -12px;
 }
 .lp-card {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
 	min-width: 0;
 	padding: 12px;
-	border-radius: 8px;
-	background: rgba(var(--spice-rgb-text), 0.05);
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background-color 0.2s ease;
 }
-.lp-card:hover {
+.lp-card:hover,
+.lp-card:focus-visible {
 	background: rgba(var(--spice-rgb-text), 0.1);
+	outline: none;
 }
 .lp-card img {
 	width: 100%;
 	aspect-ratio: 1;
 	margin-bottom: 8px;
-	border-radius: 4px;
+	border-radius: 6px;
 	object-fit: cover;
-	cursor: pointer;
+	box-shadow: 0 8px 24px rgba(var(--spice-rgb-shadow, 0, 0, 0), 0.5);
 }
-.lp-card-name {
-	padding: 0;
-	border: 0;
-	background: none;
-	color: var(--spice-text);
-	font: inherit;
-	font-weight: 700;
-	text-align: left;
+.lp-card-name,
+.lp-card-artist {
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
-	cursor: pointer;
+}
+.lp-card-name {
+	color: var(--spice-text);
+	font-size: 15px;
+	font-weight: 700;
+	line-height: 1.4;
 }
 .lp-card-artist {
 	color: var(--spice-subtext);
 	font-size: 13px;
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-}
-.lp-card-actions {
-	display: flex;
-	gap: 6px;
-	margin-top: 8px;
-}
-.lp-card-actions .lp-btn {
-	padding: 4px 8px;
+	line-height: 1.5;
 }
 
 .lp-sort {
@@ -304,4 +293,32 @@
 .lp-row-x:hover {
 	color: var(--spice-text);
 	background: rgba(var(--spice-rgb-text), 0.1);
+}
+
+.lp-removed-link {
+	font-size: 13px;
+}
+.lp-removed {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.lp-removed-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 6px 8px;
+	border-radius: 4px;
+}
+.lp-removed-row:hover {
+	background: rgba(var(--spice-rgb-text), 0.1);
+}
+.lp-removed-row span {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+.lp-removed .lp-more {
+	align-self: flex-start;
 }

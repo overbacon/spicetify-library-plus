@@ -12,12 +12,12 @@ Your whole Spotify library as one playlist.
   - search across tracks and albums;
   - **mood filters**: Spotify's Liked Songs chips (Rock, Chill, Sad…) applied to the whole library;
   - sorting by date added, title, artist, album or duration (albums: date added, title or artist). Sorting is remembered;
-  - the × on a track row removes a single album track from the library (“Bring back removed tracks” undoes it);
+  - the × on a track row takes it out of My Library (the like and the album stay). Tracks you delete from the playlist in Spotify itself stay out too, instead of coming back at the next sync. The small “Removed: N” link lists them, and you can bring each one back;
   - **No Liked Songs** toggle: hides your liked tracks and skips them on every tab, so you hear only what you haven't liked yet. It stays on until you switch it off;
   - right-click a track or album for Spotify's own menu.
 
   The buttons play what the open tab shows: the library, the filtered or sorted list, or the albums on a shelf. Smart Shuffle works everywhere too. A list that isn't a whole playlist is written into a third private playlist, “Library+ · Now Playing”, and played from there. Library+ pins it after your own pins and gives it a fixed cover, so it doesn't jump around the sidebar.
-- **Album shelves.** “Albums” = your saved albums; their tracks are part of the library. “Listen later” = albums put aside for later. They are not played with the library and live in a second private playlist, so you see them on your phone too. Right-click any album → “Library+: …”, or use the buttons on the cards.
+- **Album shelves.** “Albums” = your saved albums; their tracks are part of the library. “Listen later” = albums put aside for later. They are not played with the library and live in a second private playlist, so you see them on your phone too. Albums are shown as Spotify-style tiles: click to open, right-click for the menu.
 
 The interface is in English or Russian, depending on Spotify's language.
 
@@ -43,7 +43,7 @@ spicetify apply
 ## Notes
 
 - Local files from Liked Songs are skipped.
-- Library+ manages the playlist's contents. Tracks you add or remove by hand are put back at the next sync. Reordering is kept.
+- Library+ manages the playlist's contents. Tracks you add by hand are removed at the next sync; tracks you remove stay removed (see “Removed: N”). Reordering is kept.
 - Requires Spicetify 2.x on a recent Spotify desktop client. Tested on Spotify 1.3.4 and 1.3.6 with Spicetify 2.45 and 2.46.
 
 ## Development
@@ -56,7 +56,7 @@ spicetify apply
 - кнопки: по порядку / перемешать / умное перемешивание / Shuffle+ — играют то, что открыто во вкладке;
 - поиск, фильтры настроений, сортировка, родное меню по правому клику;
 - переключатель «Без любимых»: лайкнутые треки скрыты и не играют ни на одной вкладке;
-- сортировка альбомов, крестик в строке убирает отдельный трек альбома из библиотеки;
+- альбомы плитками, как в Spotify, с сортировкой; крестик в строке убирает трек из «Моей библиотеки», удалённые прямо в Spotify тоже не возвращаются, а вернуть их можно через «Убрано: N»;
 - полки альбомов «Альбомы» и «Послушать позже».
 
 Установка на Windows — команда выше.

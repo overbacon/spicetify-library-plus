@@ -15,6 +15,16 @@ function libraryPlusPlan(want, have) {
 	return { remove, add: want.filter((uri) => !kept.has(uri)) };
 }
 
+// Tracks the user deleted from the playlist by hand in Spotify: in the playlist at the last sync (prev snapshot),
+// missing now, still wanted. Sync keeps them out instead of adding them back. prev: {uri: label} | null.
+function libraryPlusRemovedByHand(want, have, prev, excluded) {
+	if (!prev || !have.length) return [];
+	const haveSet = new Set(have.map((row) => row.uri));
+	const gone = want.filter((uri) => !haveSet.has(uri) && uri in prev && !(uri in excluded));
+	// a big drop is a half-loaded playlist, not the user's hand: never hide a chunk of the library on a glitch
+	return gone.length > Math.max(20, want.length * 0.05) ? [] : gone;
+}
+
 const LIBRARY_PLUS_STRINGS = {
 	en: {
 		libraryName: "My Library",
@@ -66,12 +76,17 @@ const LIBRARY_PLUS_STRINGS = {
 		noLikedTitle: "Hide Liked Songs and don't play them, on every tab",
 		rowTitle: "Double-click to play from here, right-click for the menu",
 		more: "Show more ({0})",
-		playAlbum: "Play album",
-		removeFromLibrary: "Remove from library",
-		toAlbums: "Move to “Albums” (save to library)",
-		removeLater: "Remove from “Listen later”",
-		excludeTrack: "Remove this album track from the library",
-		restoreExcluded: "Bring back removed tracks ({0})",
+		excludeTrack: "Remove from My Library (the like and the album stay)",
+		removedLink: "Removed: {0}",
+		removedTitle: "Removed tracks",
+		removedHint: "These tracks stay out of My Library. Tracks you delete from the playlist in Spotify land here too.",
+		bringBack: "Bring back",
+		bringBackAll: "Bring back all",
+		single: "Single",
+		playAlbum: "Play",
+		toAlbums: "Move to Albums (save to library)",
+		removeLater: "Remove from Listen later",
+		openAlbum: "Open album",
 		emptyAlbums: "No albums yet. Right-click an album → “Library+: add to Albums”, or press its heart.",
 		emptyLater: "Empty. Right-click any album → “Library+: listen later”.",
 	},
@@ -125,12 +140,17 @@ const LIBRARY_PLUS_STRINGS = {
 		noLikedTitle: "Скрыть любимые треки и не играть их — на всех вкладках",
 		rowTitle: "Двойной клик — играть отсюда, правый клик — меню",
 		more: "Показать ещё ({0})",
-		playAlbum: "Слушать альбом",
-		removeFromLibrary: "Убрать из библиотеки",
-		toAlbums: "Перенести в «Альбомы» (сохранить в библиотеку)",
+		excludeTrack: "Убрать из «Моей библиотеки» (лайк и альбом остаются)",
+		removedLink: "Убрано: {0}",
+		removedTitle: "Убранные треки",
+		removedHint: "Эти треки не попадают в «Мою библиотеку». Сюда же попадают треки, которые вы удалили из плейлиста прямо в Spotify.",
+		bringBack: "Вернуть",
+		bringBackAll: "Вернуть все",
+		single: "Сингл",
+		playAlbum: "Слушать",
+		toAlbums: "Перенести в «Альбомы» (сохранить в медиатеку)",
 		removeLater: "Убрать из «Послушать позже»",
-		excludeTrack: "Убрать этот трек альбома из библиотеки",
-		restoreExcluded: "Вернуть убранные треки ({0})",
+		openAlbum: "Открыть альбом",
 		emptyAlbums: "Нет альбомов. ПКМ по альбому → «Library+: в «Альбомы»» или сердечко.",
 		emptyLater: "Пусто. ПКМ по любому альбому → «Library+: послушать позже».",
 	},
@@ -203,26 +223,38 @@ const LIBRARY_PLUS_STRINGS = {
 		// last chunk first, each before "start", so the final order matches `uris`
 		for (let i = Math.floor((uris.length - 1) / 100) * 100; i >= 0; i -= 100) await P.PlaylistAPI.add(pl, uris.slice(i, i + 100), { before: "start" }, SILENT);
 	}
+	// one request: each one waits for the server, and Spotify takes 1300+ rows at once
 	async function removeRows(pl, rows) {
-		for (let i = 0; i < rows.length; i += 100) await P.PlaylistAPI.remove(pl, rows.slice(i, i + 100).map(({ uri, uid }) => ({ uri, uid })));
+		if (rows.length) await P.PlaylistAPI.remove(pl, rows.map(({ uri, uid }) => ({ uri, uid })));
 	}
 
-	// Album tracks the user removed from the library one by one.
+	// Tracks kept out of "My Library": removed with the × on the page or deleted from the playlist by hand. {uri: label}
 	// shortcut: kept on this computer only (only this computer's Library+ syncs); move to the account if that changes
 	const KEY_EXCLUDED = "library-plus:excluded";
-	function getExcluded() {
+	const KEY_SNAPSHOT = "library-plus:snapshot"; // playlist contents after the last sync, to spot removals by hand
+	function readJSON(key, fallback) {
 		try {
-			return new Set(JSON.parse(S.LocalStorage.get(KEY_EXCLUDED)) ?? []);
+			return JSON.parse(S.LocalStorage.get(key)) ?? fallback;
 		} catch {
-			return new Set();
+			return fallback;
 		}
 	}
-	function setExcluded(set) {
-		S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify([...set]));
+	function getExcluded() {
+		const v = readJSON(KEY_EXCLUDED, {});
+		return Array.isArray(v) ? Object.fromEntries(v.map((uri) => [uri, ""])) : v; // 1.3 stored a bare list
+	}
+	function setExcluded(map) {
+		S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify(map));
 		sync();
 	}
-	const excludeTrack = (uri) => setExcluded(getExcluded().add(uri));
-	const restoreExcluded = () => setExcluded(new Set());
+	const label = (tr) => `${tr.name} — ${(tr.artists ?? []).map((a) => a.name).join(", ")}`;
+	const excludeTrack = (tr) => setExcluded({ ...getExcluded(), [tr.uri]: label(tr) });
+	function restoreTracks(uris) {
+		const map = getExcluded();
+		for (const uri of uris) delete map[uri];
+		setExcluded(map);
+	}
+	const getRemoved = () => Object.entries(getExcluded()).map(([uri, name]) => ({ uri, name }));
 
 	const getAlbums = async () =>
 		(await P.LibraryAPI.getContents({ filters: ["0"], limit: 9999 })).items
@@ -274,7 +306,6 @@ const LIBRARY_PLUS_STRINGS = {
 		if (laterSet.has(uri)) await removeLater(uri);
 		S.showNotification(t("addedAlbums"));
 	}
-	const removeAlbum = (uri) => P.LibraryAPI.remove({ uris: [uri] });
 
 	// v1.0 kept the shelf in LocalStorage; move it into the playlist once
 	async function migrateLater() {
@@ -291,18 +322,27 @@ const LIBRARY_PLUS_STRINGS = {
 		const [liked, albums, later] = await Promise.all([P.LibraryAPI.getTracks({ limit: 99999 }), getAlbums(), getLater()]);
 		// shortcut: local files are skipped, Spotify playlists can't hold them reliably
 		const rows = liked.items.filter((tr) => !tr.isLocal).map((tr) => ({ uri: tr.uri, t: Date.parse(tr.addedAt), i: 0 }));
-		const excluded = getExcluded(); // only album tracks; a liked track stays through its like
 		for (const a of albums) {
 			const at = Date.parse(a.addedAt);
-			(await albumTracks(a.uri)).forEach((uri, i) => excluded.has(uri) || rows.push({ uri, t: at, i }));
+			(await albumTracks(a.uri)).forEach((uri, i) => rows.push({ uri, t: at, i }));
 		}
 		rows.sort((a, b) => b.t - a.t || a.i - b.i); // newest first, album tracks in album order
-		const want = [...new Set(rows.map((r) => r.uri))];
+		const wanted = [...new Set(rows.map((r) => r.uri))];
 
-		const { remove, add } = libraryPlusPlan(want, await contents(pl));
+		const have = await contents(pl);
+		const excluded = getExcluded();
+		const prev = readJSON(KEY_SNAPSHOT, null);
+		const byHand = libraryPlusRemovedByHand(wanted, have, prev, excluded);
+		if (byHand.length) {
+			for (const uri of byHand) excluded[uri] = prev[uri];
+			S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify(excluded));
+		}
+		const want = wanted.filter((uri) => !(uri in excluded));
+		const { remove, add } = libraryPlusPlan(want, have);
 		await removeRows(pl, remove);
 		// shortcut: new tracks go to the top (they are the newest); order drifts only if an old item reappears
 		await addTop(pl, add);
+		S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(Object.fromEntries((await contents(pl)).map((tr) => [tr.uri, label(tr)]))));
 
 		for (const kind of ["later", "now"]) {
 			const other = await existing(kind);
@@ -403,9 +443,14 @@ const LIBRARY_PLUS_STRINGS = {
 				const fresh = !(await existing("now"));
 				pl = await ensure("now");
 				await dressNow(pl).catch((e) => console.warn("Library+ now-playlist cover/pin", e));
-				await setContents(pl, list);
-				// shortcut: the player can't resolve a playlist created a moment ago; only the very first run waits
-				if (fresh) await sleep(2500);
+				const current = (await contents(pl)).map((tr) => tr.uri);
+				// same list as last time (another row, another mode): leave the playlist alone, so the player keeps
+				// its loaded queue instead of reloading the whole context
+				if (current.length !== list.length || current.some((uri, i) => uri !== list[i])) {
+					await setContents(pl, list);
+					// shortcut: the player can't resolve a playlist created a moment ago; only the very first run waits
+					if (fresh) await sleep(2500);
+				}
 			}
 			// play() applies the saved per-playlist mode; ShuffleAPI.setShuffle doesn't save it while the playlist is playing
 			await P.ContextualShuffleAPI.setContextualShuffleMode(pl, SHUFFLE_MODE[mode]);
@@ -430,7 +475,7 @@ const LIBRARY_PLUS_STRINGS = {
 	async function playAlbums(mode, albumUris, skip) {
 		try {
 			const excluded = getExcluded();
-			const uris = (await Promise.all(albumUris.map(albumTracks))).flat().filter((uri) => !excluded.has(uri) && !skip?.has(uri));
+			const uris = (await Promise.all(albumUris.map(albumTracks))).flat().filter((uri) => !(uri in excluded) && !skip?.has(uri));
 			await play(mode, uris);
 		} catch (e) {
 			S.showNotification(`Library+: ${e?.message ?? e}`, true);
@@ -476,14 +521,14 @@ const LIBRARY_PLUS_STRINGS = {
 			tags,
 			canSmart: !!elig.canSmartShuffle,
 			liked: new Set(liked.items.map((tr) => tr.uri)),
-			excluded: getExcluded().size,
+			removedCount: Object.keys(getExcluded()).length,
 		};
 	}
 
 	// ---------- context menu ----------
 	const isAlbum = (uris) => uris.length === 1 && S.URI.isAlbum(uris[0]);
 	const safe = (fn) => (uris) => fn(uris[0]).catch((e) => S.showNotification(`Library+: ${e?.message ?? e}`, true));
-	new S.ContextMenu.Item(t("menuAlbums"), safe(toAlbums), isAlbum, "album").register();
+	new S.ContextMenu.Item(t("menuAlbums"), safe(toAlbums), (u) => isAlbum(u) && !P.LibraryAPI.containsSync(u[0]), "album").register();
 	new S.ContextMenu.Item(t("menuLater"), safe(toLater), (u) => isAlbum(u) && !laterSet.has(u[0]), "clock").register();
 	new S.ContextMenu.Item(t("menuUnlater"), safe(removeLater), (u) => isAlbum(u) && laterSet.has(u[0]), "x").register();
 
@@ -505,16 +550,15 @@ const LIBRARY_PLUS_STRINGS = {
 		lang,
 		sync,
 		play,
-		playUri,
 		playAlbums,
 		load,
 		moodUris,
-		toLater,
-		toAlbums,
-		removeAlbum,
-		removeLater,
 		excludeTrack,
-		restoreExcluded,
+		restoreTracks,
+		playUri,
+		toAlbums,
+		removeLater,
+		getRemoved,
 	};
 	setTimeout(() => migrateLater().catch((e) => console.error("Library+ migrate", e)).finally(sync), 5000);
 })();
