@@ -152,6 +152,21 @@ function RemovedList({ LP }) {
 	);
 }
 
+// Sort-Play (another extension) puts its button only into Spotify's playlist pages and has no API to open its menu.
+// So this opens the playlist and presses Sort-Play's own button there.
+const hasSortPlay = () => !!window.SortPlaySyncUtils || [...document.scripts].some((s) => /sort-play/i.test(s.src));
+function openSortPlay(uri) {
+	go(uri);
+	let tries = 0;
+	const id = setInterval(() => {
+		const btn = [...document.querySelectorAll("button")].find((b) => b.title === "sort-play extension" || /^Sorts*Play/i.test(b.textContent.trim()));
+		if (btn || ++tries > 60) {
+			clearInterval(id);
+			btn?.click();
+		}
+	}, 100);
+}
+
 function Page({ LP }) {
 	const { t, count, state } = LP;
 	const [ver, setVer] = useState(0);
@@ -257,6 +272,7 @@ function Page({ LP }) {
 		}),
 		h(Btn, { icon: "shuffle", label: "Shuffle+", title: t("shufflePlusTitle"), onClick: () => playTab("shuffle+") }),
 		h(Btn, { icon: "playlist", title: t("openPlaylist"), onClick: () => go(data.playlist) }),
+		hasSortPlay() && h(Btn, { label: "Sort Play", title: t("sortPlayTitle"), onClick: () => openSortPlay(tab === "later" && data.laterPlaylist ? data.laterPlaylist : data.playlist) }),
 		h(Btn, { icon: "repeat", title: t("syncNow"), onClick: () => LP.sync(), disabled: state.syncing }),
 		h(Btn, { icon: "heart", label: t("noLiked"), title: t("noLikedTitle"), onClick: () => setNoLikedFlag(noLiked ? "0" : "1"), pressed: noLiked, className: "lp-push" }),
 		h("input", { className: "lp-search", type: "search", placeholder: t("search"), value: query, onChange: (e) => setQuery(e.target.value), "aria-label": t("search") })

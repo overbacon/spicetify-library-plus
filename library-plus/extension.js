@@ -83,6 +83,7 @@ const LIBRARY_PLUS_STRINGS = {
 		bringBack: "Bring back",
 		bringBackAll: "Bring back all",
 		single: "Single",
+		sortPlayTitle: "Open Sort-Play for this playlist",
 		playAlbum: "Play",
 		toAlbums: "Move to Albums (save to library)",
 		removeLater: "Remove from Listen later",
@@ -147,6 +148,7 @@ const LIBRARY_PLUS_STRINGS = {
 		bringBack: "Вернуть",
 		bringBackAll: "Вернуть все",
 		single: "Сингл",
+		sortPlayTitle: "Открыть Sort-Play для этого плейлиста",
 		playAlbum: "Слушать",
 		toAlbums: "Перенести в «Альбомы» (сохранить в медиатеку)",
 		removeLater: "Убрать из «Послушать позже»",
@@ -596,6 +598,7 @@ const LIBRARY_PLUS_STRINGS = {
 		// all three playlists are the user's own, so the library's answer stands for them
 		return {
 			playlist: pl,
+			laterPlaylist: await existing("later"),
 			tracks: tracks.filter((tr) => !(tr.uri in excluded)),
 			albums,
 			later,
