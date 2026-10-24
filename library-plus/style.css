@@ -298,27 +298,15 @@
 .lp-removed-link {
 	font-size: 13px;
 }
-.lp-removed {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
+.lp-removed .lp-grid {
+	margin-top: 8px;
 }
-.lp-removed-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-	padding: 6px 8px;
-	border-radius: 4px;
-}
-.lp-removed-row:hover {
+.lp-card-blank {
+	display: grid;
+	place-items: center;
+	aspect-ratio: 1;
+	margin-bottom: 8px;
+	border-radius: 6px;
 	background: rgba(var(--spice-rgb-text), 0.1);
-}
-.lp-removed-row span {
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-}
-.lp-removed .lp-more {
-	align-self: flex-start;
+	color: var(--spice-subtext);
 }

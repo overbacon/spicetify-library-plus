@@ -113,27 +113,42 @@ function AlbumCard({ t, LP, later, uri, name, artists, images, albumType }) {
 	});
 }
 
-// The "Removed tracks" list, opened from the small "Removed: N" link.
+// The "Removed tracks" window, opened from the small "Removed: N" link: tiles like the Albums tab.
+// Click brings a track back; right-click: bring back / open its album.
 function RemovedList({ LP }) {
 	const { t } = LP;
+	const { Menu, MenuItem } = Spicetify.ReactComponent;
 	const [items, setItems] = useState(LP.getRemoved);
 	const back = (uris) => {
 		LP.restoreTracks(uris);
 		setItems(items.filter((it) => !uris.includes(it.uri)));
 	};
+	const openAlbum = (it) => {
+		Spicetify.PopupModal.hide();
+		go(it.album);
+	};
 	return h(
 		"div",
 		{ className: "lp-removed" },
-		h("p", { className: "lp-muted" }, t("removedHint")),
-		items.map((it) =>
-			h(
-				"div",
-				{ key: it.uri, className: "lp-removed-row" },
-				h("span", null, it.name || it.uri),
-				h(Btn, { label: t("bringBack"), onClick: () => back([it.uri]) })
+		h("div", { className: "lp-moods" }, h("span", { className: "lp-muted" }, t("removedHint")), items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => back(items.map((it) => it.uri)), className: "lp-push" })),
+		h(
+			"div",
+			{ className: "lp-grid" },
+			items.map((it) =>
+				h(NativeMenu, {
+					key: it.uri,
+					menu: Menu && MenuItem && h(Menu, null, h(MenuItem, { onClick: () => back([it.uri]) }, t("bringBack")), it.album && h(MenuItem, { onClick: () => openAlbum(it) }, t("openAlbum"))),
+					render: (onContextMenu, ref) =>
+						h(
+							"div",
+							{ className: "lp-card", onContextMenu, ref, role: "button", tabIndex: 0, title: t("bringBack"), onClick: () => back([it.uri]), onKeyDown: (e) => e.key === "Enter" && back([it.uri]) },
+							it.image ? h("img", { src: it.image.replace("spotify:image:", "https://i.scdn.co/image/"), alt: "", loading: "lazy" }) : h("div", { className: "lp-card-blank" }, h(Icon, { name: "track", size: 48 })),
+							h("div", { className: "lp-card-name", title: it.name }, it.name || it.uri),
+							it.artist && h("div", { className: "lp-card-artist", title: it.artist }, it.artist)
+						),
+				})
 			)
-		),
-		items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => back(items.map((it) => it.uri)), className: "lp-more" })
+		)
 	);
 }
 
@@ -149,6 +164,7 @@ function Page({ LP }) {
 	const [sort, setSort] = usePersisted("sort", "added");
 	const [albumSort, setAlbumSort] = usePersisted("album-sort", "added");
 	const [limit, setLimit] = useState(200);
+	const [gone, setGone] = useState(() => new Set()); // rows hidden on click, until fresh data (which excludes them) arrives
 	const [noLikedFlag, setNoLikedFlag] = usePersisted("no-liked", "0");
 	const noLiked = noLikedFlag === "1";
 
@@ -160,7 +176,7 @@ function Page({ LP }) {
 	useEffect(() => {
 		let live = true;
 		LP.load()
-			.then((d) => live && (setData(d), setError(null)))
+			.then((d) => live && (setData(d), setGone(new Set()), setError(null)))
 			.catch((e) => live && setError(String(e?.message ?? e)));
 		return () => {
 			live = false;
@@ -182,7 +198,7 @@ function Page({ LP }) {
 	const match = (...s) => !q || s.some((x) => x?.toLowerCase().includes(q));
 	const skip = noLiked ? data.liked : null; // liked tracks hidden and not played while "No Liked Songs" is on
 	let tracks = data.tracks.filter(
-		(tr) => !skip?.has(tr.uri) && (!mood || moodSet?.has(tr.uri)) && match(tr.name, tr.album?.name, ...(tr.artists ?? []).map((a) => a.name))
+		(tr) => !gone.has(tr.uri) && !skip?.has(tr.uri) && (!mood || moodSet?.has(tr.uri)) && match(tr.name, tr.album?.name, ...(tr.artists ?? []).map((a) => a.name))
 	);
 	if (SORTS[sort]) tracks = [...tracks].sort(SORTS[sort]);
 	const shelfOf = (list) => {
@@ -310,7 +326,7 @@ function Page({ LP }) {
 								className: "lp-row-x",
 								title: t("excludeTrack"),
 								"aria-label": t("excludeTrack"),
-								onClick: (e) => (e.stopPropagation(), LP.excludeTrack(tr)),
+								onClick: (e) => (e.stopPropagation(), setGone(new Set(gone).add(tr.uri)), LP.excludeTrack(tr)),
 								onDoubleClick: (e) => e.stopPropagation(),
 							},
 							h(Icon, { name: "x" })

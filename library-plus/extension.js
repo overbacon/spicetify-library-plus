@@ -242,8 +242,12 @@ const LIBRARY_PLUS_STRINGS = {
 		if (uris.length) await P.PlaylistAPI.add(pl, uris, { before: "start" }, SILENT);
 	}
 	async function removeRows(pl, rows) {
-		contentsCache.delete(pl);
-		if (rows.length) await P.PlaylistAPI.remove(pl, rows.map(({ uri, uid }) => ({ uri, uid })));
+		if (!rows.length) return;
+		// drop the rows from the cached read instead of re-reading 1300 tracks (a long freeze of Spotify's UI)
+		const uids = new Set(rows.map((r) => r.uid));
+		const cached = contentsCache.get(pl);
+		if (cached) contentsCache.set(pl, cached.then((items) => items.filter((r) => !uids.has(r.uid))));
+		await P.PlaylistAPI.remove(pl, rows.map(({ uri, uid }) => ({ uri, uid })));
 	}
 
 	// Tracks kept out of "My Library": removed with the × on the page or deleted from the playlist by hand. {uri: label}
@@ -265,14 +269,35 @@ const LIBRARY_PLUS_STRINGS = {
 		S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify(map));
 		sync();
 	}
-	const label = (tr) => `${tr.name} — ${(tr.artists ?? []).map((a) => a.name).join(", ")}`;
-	const excludeTrack = (tr) => setExcluded({ ...getExcluded(), [tr.uri]: label(tr) });
+	// what the "Removed" tiles show; 1.3.1 kept a plain "name — artist" string
+	const meta = (tr) => ({
+		name: tr.name,
+		artist: (tr.artists ?? []).map((a) => a.name).join(", "),
+		image: (tr.album?.images?.find((i) => i.label === "standard") ?? tr.album?.images?.[0])?.url ?? "",
+		album: tr.album?.uri ?? "",
+	});
+	const asMeta = (v) => (typeof v === "string" ? { name: v, artist: "", image: "", album: "" } : v);
+
+	// Instant: the row leaves the playlist on its own, no full sync (that reads the whole library and took seconds)
+	async function excludeTrack(tr) {
+		S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify({ ...getExcluded(), [tr.uri]: meta(tr) }));
+		changed();
+		const pl = await ensure("library");
+		await removeRows(pl, (await contents(pl)).filter((row) => row.uri === tr.uri));
+		const snap = readJSON(KEY_SNAPSHOT, null);
+		if (snap) {
+			delete snap[tr.uri];
+			S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(snap));
+		}
+		if (running) sync(); // a sync already under way read the old list and would put the track back: run it again
+		changed();
+	}
 	function restoreTracks(uris) {
 		const map = getExcluded();
 		for (const uri of uris) delete map[uri];
-		setExcluded(map);
+		setExcluded(map); // sync puts them back in their place
 	}
-	const getRemoved = () => Object.entries(getExcluded()).map(([uri, name]) => ({ uri, name }));
+	const getRemoved = () => Object.entries(getExcluded()).map(([uri, v]) => ({ uri, ...asMeta(v) }));
 
 	const getAlbums = async () =>
 		(await P.LibraryAPI.getContents({ filters: ["0"], limit: 9999 })).items
@@ -360,7 +385,7 @@ const LIBRARY_PLUS_STRINGS = {
 		await removeRows(pl, remove);
 		// shortcut: new tracks go to the top (they are the newest); order drifts only if an old item reappears
 		await addTop(pl, add);
-		S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(Object.fromEntries((await contents(pl, true)).map((tr) => [tr.uri, label(tr)]))));
+		S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(Object.fromEntries((await contents(pl, true)).map((tr) => [tr.uri, meta(tr)]))));
 
 		for (const kind of ["later", "now"]) {
 			const other = await existing(kind, true);
@@ -505,10 +530,17 @@ const LIBRARY_PLUS_STRINGS = {
 	const getTracks = async () => contents(await ensure("library"));
 
 	let tagsCache = null;
-	const getTags = async () =>
-		(tagsCache ??= (await P.LibraryAPI.getTracksFilterTags())
-			.filter((tg) => tg.filter.startsWith("tags contains "))
-			.map((tg) => ({ name: tg.name, tag: tg.filter.slice("tags contains ".length) })));
+	// Spotify's mood chips of Liked Songs, e.g. {name: "Rock", filter: "tags contains rock"}. Spotify decides per account
+	// whether there are any (the Liked Songs page then shows no chips either); the raw answer is logged for that case.
+	async function getTags() {
+		if (tagsCache) return tagsCache;
+		const raw = (await P.LibraryAPI.getTracksFilterTags?.()) ?? [];
+		const tags = raw
+			.map((tg) => ({ name: tg.name, tag: /tags\s+contains\s+["']?([^"']+?)["']?\s*$/i.exec(tg.filter ?? "")?.[1] }))
+			.filter((tg) => tg.name && tg.tag);
+		if (!tags.length) console.info("Library+: no mood filters from Spotify", raw);
+		return (tagsCache = tags);
+	}
 
 	// Spotify's Liked Songs mood chips are descriptor filters; the same filter works on any playlist.
 	async function moodUris(tag) {
@@ -531,16 +563,17 @@ const LIBRARY_PLUS_STRINGS = {
 			P.SmartShuffleEligibilityAPI.getEligibility(pl).catch(() => ({})),
 			P.LibraryAPI.getTracks({ limit: 99999 }),
 		]);
+		const excluded = getExcluded(); // a just-removed track hides at once, before the playlist write lands
 		// all three playlists are the user's own, so the library's answer stands for them
 		return {
 			playlist: pl,
-			tracks,
+			tracks: tracks.filter((tr) => !(tr.uri in excluded)),
 			albums,
 			later,
 			tags,
 			canSmart: !!elig.canSmartShuffle,
 			liked: new Set(liked.items.map((tr) => tr.uri)),
-			removedCount: Object.keys(getExcluded()).length,
+			removedCount: Object.keys(excluded).length,
 		};
 	}
 

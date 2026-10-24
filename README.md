@@ -12,7 +12,7 @@ Your whole Spotify library as one playlist.
   - search across tracks and albums;
   - **mood filters**: Spotify's Liked Songs chips (Rock, Chill, Sad…) applied to the whole library;
   - sorting by date added, title, artist, album or duration (albums: date added, title or artist). Sorting is remembered;
-  - the × on a track row takes it out of My Library (the like and the album stay). Tracks you delete from the playlist in Spotify itself stay out too, instead of coming back at the next sync. The small “Removed: N” link lists them, and you can bring each one back;
+  - the × on a track row takes it out of My Library (the like and the album stay). Tracks you delete from the playlist in Spotify itself stay out too, instead of coming back at the next sync. The small “Removed: N” link shows them as tiles: click one to bring it back;
   - **No Liked Songs** toggle: hides your liked tracks and skips them on every tab, so you hear only what you haven't liked yet. It stays on until you switch it off;
   - right-click a track or album for Spotify's own menu.
 
