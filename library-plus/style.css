@@ -295,12 +295,6 @@
 	background: rgba(var(--spice-rgb-text), 0.1);
 }
 
-.lp-removed-link {
-	font-size: 13px;
-}
-.lp-removed .lp-grid {
-	margin-top: 8px;
-}
 .lp-card-blank {
 	display: grid;
 	place-items: center;
@@ -309,4 +303,12 @@
 	border-radius: 6px;
 	background: rgba(var(--spice-rgb-text), 0.1);
 	color: var(--spice-subtext);
+}
+
+.lp-removed-title {
+	font-size: 18px;
+	font-weight: 700;
+}
+.lp-row-removed {
+	grid-template-columns: 32px 40px minmax(0, 1fr) auto;
 }

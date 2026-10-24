@@ -77,9 +77,12 @@ const LIBRARY_PLUS_STRINGS = {
 		rowTitle: "Double-click to play from here, right-click for the menu",
 		more: "Show more ({0})",
 		excludeTrack: "Remove from My Library (the like and the album stay)",
-		removedLink: "Removed: {0}",
-		removedTitle: "Removed tracks",
-		removedHint: "These tracks stay out of My Library. Tracks you delete from the playlist in Spotify land here too.",
+		tabRemoved: "Removed",
+		backToRemoved: "All removed",
+		otherAlbum: "Other tracks",
+		bringBackAlbum: "Bring back this album's tracks",
+		nothingRemoved: "Nothing removed.",
+		removedHint: "These tracks stay out of My Library, grouped by album. Tracks you delete from the playlist in Spotify land here too.",
 		bringBack: "Bring back",
 		bringBackAll: "Bring back all",
 		single: "Single",
@@ -142,9 +145,12 @@ const LIBRARY_PLUS_STRINGS = {
 		rowTitle: "Двойной клик — играть отсюда, правый клик — меню",
 		more: "Показать ещё ({0})",
 		excludeTrack: "Убрать из «Моей библиотеки» (лайк и альбом остаются)",
-		removedLink: "Убрано: {0}",
-		removedTitle: "Убранные треки",
-		removedHint: "Эти треки не попадают в «Мою библиотеку». Сюда же попадают треки, которые вы удалили из плейлиста прямо в Spotify.",
+		tabRemoved: "Убранные",
+		backToRemoved: "Все убранные",
+		otherAlbum: "Другие треки",
+		bringBackAlbum: "Вернуть треки этого альбома",
+		nothingRemoved: "Ничего не убрано.",
+		removedHint: "Эти треки не попадают в «Мою библиотеку», по альбомам. Сюда же попадают треки, которые вы удалили из плейлиста прямо в Spotify.",
 		bringBack: "Вернуть",
 		bringBackAll: "Вернуть все",
 		single: "Сингл",
@@ -277,8 +283,17 @@ const LIBRARY_PLUS_STRINGS = {
 		artist: (tr.artists ?? []).map((a) => a.name).join(", "),
 		image: (tr.album?.images?.find((i) => i.label === "standard") ?? tr.album?.images?.[0])?.url ?? "",
 		album: tr.album?.uri ?? "",
+		albumName: tr.album?.name ?? "",
 	});
-	const asMeta = (v) => (typeof v === "string" ? { name: v, artist: "", image: "", album: "" } : v);
+	const asMeta = (v) => (typeof v === "string" ? { name: v, artist: "", image: "", album: "", albumName: "" } : v);
+	async function trackMeta(uri) {
+		const { data } = await S.GraphQL.Request(S.GraphQL.Definitions.getTrack, { uri });
+		const tr = data?.trackUnion;
+		if (!tr?.name) return null;
+		const a = tr.albumOfTrack;
+		const artists = [tr.firstArtist, tr.otherArtists].flatMap((x) => x?.items ?? []).map((x) => x.profile?.name);
+		return { name: tr.name, artist: artists.filter(Boolean).join(", "), image: a?.coverArt?.sources?.[0]?.url ?? "", album: a?.uri ?? "", albumName: a?.name ?? "" };
+	}
 
 	// Instant: the row leaves the playlist on its own, no full sync (that reads the whole library and took seconds)
 	async function excludeTrack(tr) {
@@ -299,7 +314,19 @@ const LIBRARY_PLUS_STRINGS = {
 		for (const uri of uris) delete map[uri];
 		setExcluded(map); // sync puts them back in their place
 	}
-	const getRemoved = () => Object.entries(getExcluded()).map(([uri, v]) => ({ uri, ...asMeta(v) }));
+	// Entries made before 1.3.3 kept only "name — artist": their cover and album are fetched once and saved.
+	async function getRemoved() {
+		const missing = Object.entries(getExcluded()).filter(([, v]) => !asMeta(v).album).map(([uri]) => uri);
+		const filled = {};
+		for (let i = 0; i < missing.length; i += 8) {
+			await Promise.all(missing.slice(i, i + 8).map(async (uri) => (filled[uri] = await trackMeta(uri).catch(() => null))));
+		}
+		const map = getExcluded(); // re-read: a track may have been removed or brought back meanwhile
+		let wrote = false;
+		for (const [uri, m] of Object.entries(filled)) if (m && uri in map) (map[uri] = m), (wrote = true);
+		if (wrote) S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify(map));
+		return Object.entries(map).map(([uri, v]) => ({ uri, ...asMeta(v) }));
+	}
 
 	const getAlbums = async () =>
 		(await P.LibraryAPI.getContents({ filters: ["0"], limit: 9999 })).items
@@ -586,13 +613,14 @@ const LIBRARY_PLUS_STRINGS = {
 
 	async function load() {
 		const pl = await ensure("library");
-		const [tracks, albums, later, tags, elig, liked] = await Promise.all([
+		const [tracks, albums, later, tags, elig, liked, removed] = await Promise.all([
 			getTracks(),
 			getAlbums(),
 			getLater(),
 			getTags().catch(() => []),
 			P.SmartShuffleEligibilityAPI.getEligibility(pl).catch(() => ({})),
 			P.LibraryAPI.getTracks({ limit: 99999 }),
+			getRemoved(),
 		]);
 		const excluded = getExcluded(); // a just-removed track hides at once, before the playlist write lands
 		// all three playlists are the user's own, so the library's answer stands for them
@@ -605,7 +633,7 @@ const LIBRARY_PLUS_STRINGS = {
 			tags,
 			canSmart: !!elig.canSmartShuffle,
 			liked: new Set(liked.items.map((tr) => tr.uri)),
-			removedCount: Object.keys(excluded).length,
+			removed,
 		};
 	}
 
@@ -642,7 +670,6 @@ const LIBRARY_PLUS_STRINGS = {
 		playUri,
 		toAlbums,
 		removeLater,
-		getRemoved,
 	};
 	setTimeout(() => migrateLater().catch((e) => console.error("Library+ migrate", e)).finally(sync), 5000);
 })();

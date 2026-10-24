@@ -12,7 +12,7 @@ Your whole Spotify library as one playlist.
   - search across tracks and albums;
   - **mood filters**: Spotify's Liked Songs chips (Rock, Chill, Sad…) applied to the whole library. Spotify gives these chips only to some accounts; when it gives none, Library+ tries its own set of about 40 moods and genres on your library and shows the 15 that fit most tracks;
   - sorting by date added, title, artist, album or duration (albums: date added, title or artist). Sorting is remembered;
-  - the × on a track row takes it out of My Library (the like and the album stay). Tracks you delete from the playlist in Spotify itself stay out too, instead of coming back at the next sync. The small “Removed: N” link shows them as tiles: click one to bring it back;
+  - the × on a track row takes it out of My Library (the like and the album stay). Tracks you delete from the playlist in Spotify itself stay out too, instead of coming back at the next sync. They show up in a **Removed** tab, grouped by album like the Albums tab; open an album to see and bring back just the tracks removed from it;
   - **No Liked Songs** toggle: hides your liked tracks and skips them on every tab, so you hear only what you haven't liked yet. It stays on until you switch it off;
   - right-click a track or album for Spotify's own menu.
 
@@ -56,7 +56,7 @@ spicetify apply
 - кнопки: по порядку / перемешать / умное перемешивание / Shuffle+ — играют то, что открыто во вкладке;
 - поиск, фильтры настроений, сортировка, родное меню по правому клику;
 - переключатель «Без любимых»: лайкнутые треки скрыты и не играют ни на одной вкладке;
-- альбомы плитками, как в Spotify, с сортировкой; крестик в строке убирает трек из «Моей библиотеки», удалённые прямо в Spotify тоже не возвращаются, а вернуть их можно через «Убрано: N»;
+- альбомы плитками, как в Spotify, с сортировкой; крестик в строке убирает трек из «Моей библиотеки», удалённые прямо в Spotify тоже не возвращаются, а вернуть их можно на вкладке «Убранные» (по альбомам);
 - полки альбомов «Альбомы» и «Послушать позже».
 
 Установка на Windows — команда выше.

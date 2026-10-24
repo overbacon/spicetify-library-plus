@@ -113,40 +113,77 @@ function AlbumCard({ t, LP, later, uri, name, artists, images, albumType }) {
 	});
 }
 
-// The "Removed tracks" window, opened from the small "Removed: N" link: tiles like the Albums tab.
-// Click brings a track back; right-click: bring back / open its album.
-function RemovedList({ LP }) {
-	const { t } = LP;
+// "Removed" tab: removed tracks grouped by album, as Spotify-style tiles; a tile opens just that album's removed tracks.
+function groupRemoved(items) {
+	const groups = new Map();
+	for (const it of items) {
+		const key = it.album || "";
+		if (!groups.has(key)) groups.set(key, { key, name: it.albumName, artist: it.artist, image: it.image, items: [] });
+		groups.get(key).items.push(it);
+	}
+	return [...groups.values()];
+}
+const cover = (url) => (url ?? "").replace("spotify:image:", "https://i.scdn.co/image/");
+
+function RemovedTab({ LP, groups, open, setOpen, restore }) {
+	const { t, count } = LP;
 	const { Menu, MenuItem } = Spicetify.ReactComponent;
-	const [items, setItems] = useState(LP.getRemoved);
-	const back = (uris) => {
-		LP.restoreTracks(uris);
-		setItems(items.filter((it) => !uris.includes(it.uri)));
-	};
-	const openAlbum = (it) => {
-		Spicetify.PopupModal.hide();
-		go(it.album);
-	};
+	const all = groups.flatMap((g) => g.items.map((it) => it.uri));
+	if (!open)
+		return h(
+			React.Fragment,
+			null,
+			h(
+				"div",
+				{ className: "lp-moods" },
+				h("span", { className: "lp-muted" }, all.length ? t("removedHint") : t("nothingRemoved")),
+				all.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => restore(all), className: "lp-push" })
+			),
+			h(
+				"div",
+				{ className: "lp-grid" },
+				groups.map((g) =>
+					h(NativeMenu, {
+						key: g.key,
+						menu:
+							Menu &&
+							MenuItem &&
+							h(Menu, null, h(MenuItem, { onClick: () => restore(g.items.map((it) => it.uri)) }, t("bringBackAlbum")), g.key && h(MenuItem, { onClick: () => go(g.key) }, t("openAlbum"))),
+						render: (onContextMenu, ref) =>
+							h(
+								"div",
+								{ className: "lp-card", onContextMenu, ref, role: "button", tabIndex: 0, onClick: () => setOpen(g.key), onKeyDown: (e) => e.key === "Enter" && setOpen(g.key) },
+								g.image ? h("img", { src: cover(g.image), alt: "", loading: "lazy" }) : h("div", { className: "lp-card-blank" }, h(Icon, { name: "album", size: 48 })),
+								h("div", { className: "lp-card-name", title: g.name }, g.name || t("otherAlbum")),
+								h("div", { className: "lp-card-artist" }, [g.artist, count(g.items.length, "tracks")].filter(Boolean).join(" • "))
+							),
+					})
+				)
+			)
+		);
 	return h(
-		"div",
-		{ className: "lp-removed" },
-		h("div", { className: "lp-moods" }, h("span", { className: "lp-muted" }, t("removedHint")), items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => back(items.map((it) => it.uri)), className: "lp-push" })),
+		React.Fragment,
+		null,
 		h(
 			"div",
-			{ className: "lp-grid" },
-			items.map((it) =>
-				h(NativeMenu, {
-					key: it.uri,
-					menu: Menu && MenuItem && h(Menu, null, h(MenuItem, { onClick: () => back([it.uri]) }, t("bringBack")), it.album && h(MenuItem, { onClick: () => openAlbum(it) }, t("openAlbum"))),
-					render: (onContextMenu, ref) =>
-						h(
-							"div",
-							{ className: "lp-card", onContextMenu, ref, role: "button", tabIndex: 0, title: t("bringBack"), onClick: () => back([it.uri]), onKeyDown: (e) => e.key === "Enter" && back([it.uri]) },
-							it.image ? h("img", { src: it.image.replace("spotify:image:", "https://i.scdn.co/image/"), alt: "", loading: "lazy" }) : h("div", { className: "lp-card-blank" }, h(Icon, { name: "track", size: 48 })),
-							h("div", { className: "lp-card-name", title: it.name }, it.name || it.uri),
-							it.artist && h("div", { className: "lp-card-artist", title: it.artist }, it.artist)
-						),
-				})
+			{ className: "lp-moods" },
+			h(Btn, { label: "‹ " + t("backToRemoved"), onClick: () => setOpen(null) }),
+			h("span", { className: "lp-removed-title" }, open.name || t("otherAlbum")),
+			h("span", { className: "lp-muted" }, open.artist),
+			open.items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => restore(open.items.map((it) => it.uri)), className: "lp-push" })
+		),
+		h(
+			"div",
+			{ className: "lp-list" },
+			open.items.map((it, i) =>
+				h(
+					"div",
+					{ key: it.uri, className: "lp-row lp-row-removed" },
+					h("span", { className: "lp-num" }, i + 1),
+					it.image ? h("img", { src: cover(it.image), alt: "", loading: "lazy" }) : h("span"),
+					h("div", { className: "lp-title" }, h("span", null, it.name || it.uri), h("span", { className: "lp-muted" }, it.artist)),
+					h(Btn, { label: t("bringBack"), onClick: () => restore([it.uri]) })
+				)
 			)
 		)
 	);
@@ -179,7 +216,8 @@ function Page({ LP }) {
 	const [sort, setSort] = usePersisted("sort", "added");
 	const [albumSort, setAlbumSort] = usePersisted("album-sort", "added");
 	const [limit, setLimit] = useState(200);
-	const [gone, setGone] = useState(() => new Set()); // rows hidden on click, until fresh data (which excludes them) arrives
+	const [gone, setGone] = useState(() => new Set());
+	const [removedAlbum, setRemovedAlbum] = useState(null); // album opened inside the Removed tab // rows hidden on click, until fresh data (which excludes them) arrives
 	const [noLikedFlag, setNoLikedFlag] = usePersisted("no-liked", "0");
 	const noLiked = noLikedFlag === "1";
 
@@ -227,9 +265,15 @@ function Page({ LP }) {
 	const subset = filtered ? uris : undefined; // what the shuffles play
 	const ordered = filtered || SORTS[sort] ? uris : undefined; // what "in order" plays
 	const shelf = tab === "albums" ? albums : tab === "later" ? later : null;
+	const removedGroups = groupRemoved(data.removed.filter((it) => !gone.has(it.uri) && match(it.name, it.artist, it.albumName)));
+	const removedOpen = removedGroups.find((g) => g.key === removedAlbum);
+	const removedUris = (removedOpen ? removedOpen.items : removedGroups.flatMap((g) => g.items)).map((it) => it.uri);
+	const restore = (list) => (setGone(new Set([...gone, ...list])), LP.restoreTracks(list));
 	// the buttons play what the open tab shows
 	const playTab = (mode) =>
-		!shelf
+		tab === "removed"
+			? LP.play(mode, removedUris)
+			: !shelf
 			? LP.play(mode, mode === "order" ? ordered : subset)
 			: tab === "later" && !q && !skip && !ALBUM_SORTS[albumSort] && later.length
 				? LP.play(mode, undefined, undefined, "later") // the whole later playlist as it is
@@ -285,7 +329,8 @@ function Page({ LP }) {
 			["tracks", `${t("tabTracks")} · ${tracks.length}`],
 			["albums", `${t("tabAlbums")} · ${albums.length}`],
 			["later", `${t("tabLater")} · ${later.length}`],
-		].map(([id, label]) => h("button", { key: id, role: "tab", "aria-selected": tab === id, className: `lp-chip ${tab === id ? "is-active" : ""}`, onClick: () => setTab(id) }, label))
+			(data.removed.length > 0 || tab === "removed") && ["removed", `${t("tabRemoved")} · ${removedGroups.reduce((n, g) => n + g.items.length, 0)}`],
+		].filter(Boolean).map(([id, label]) => h("button", { key: id, role: "tab", "aria-selected": tab === id, className: `lp-chip ${tab === id ? "is-active" : ""}`, onClick: () => setTab(id) }, label))
 	);
 
 	let body;
@@ -297,16 +342,7 @@ function Page({ LP }) {
 			data.tags.map((m) =>
 				h("button", { key: m.tag, className: `lp-chip small ${mood?.tag === m.tag ? "is-active" : ""}`, "aria-pressed": mood?.tag === m.tag, onClick: () => setMood(mood?.tag === m.tag ? null : m) }, m.name)
 			),
-			h(SortSelect, { t, value: sort, onChange: setSort, sorts: SORTS }),
-			data.removedCount > 0 &&
-				h(
-					"button",
-					{
-						className: "lp-link lp-muted lp-removed-link",
-						onClick: () => Spicetify.PopupModal.display({ title: t("removedTitle"), content: h(RemovedList, { LP }), isLarge: true }),
-					},
-					t("removedLink", data.removedCount)
-				)
+			h(SortSelect, { t, value: sort, onChange: setSort, sorts: SORTS })
 		);
 		const hint =
 			ordered &&
@@ -358,6 +394,8 @@ function Page({ LP }) {
 			h("div", { className: "lp-list" }, rows),
 			tracks.length > limit && h(Btn, { label: t("more", tracks.length - limit), onClick: () => setLimit(limit + 200), className: "lp-more" })
 		);
+	} else if (tab === "removed") {
+		body = h(RemovedTab, { LP, groups: removedGroups, open: removedOpen, setOpen: setRemovedAlbum, restore });
 	} else {
 		body = h(
 			React.Fragment,
