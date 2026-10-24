@@ -534,24 +534,53 @@ const LIBRARY_PLUS_STRINGS = {
 	// whether there are any (the Liked Songs page then shows no chips either); the raw answer is logged for that case.
 	async function getTags() {
 		if (tagsCache) return tagsCache;
-		const raw = (await P.LibraryAPI.getTracksFilterTags?.()) ?? [];
-		const tags = raw
+		const raw = (await P.LibraryAPI.getTracksFilterTags?.().catch(() => [])) ?? [];
+		let tags = raw
 			.map((tg) => ({ name: tg.name, tag: /tags\s+contains\s+["']?([^"']+?)["']?\s*$/i.exec(tg.filter ?? "")?.[1] }))
 			.filter((tg) => tg.name && tg.tag);
-		if (!tags.length) console.info("Library+: no mood filters from Spotify", raw);
+		if (!tags.length) {
+			console.info("Library+: no mood filters from Spotify, using the built-in ones", raw);
+			tags = await fallbackTags();
+			if (!tags) return []; // library not filled yet: try again on the next load
+		}
 		return (tagsCache = tags);
 	}
 
+	// Spotify offers the chips only to some accounts, but filtering by these descriptors works for any playlist.
+	// Each one is tried on the library; the 15 that fit most tracks are shown.
+	const MOODS = {
+		fast: ["Fast", "Быстрая музыка"], dark: ["Dark", "Тьма"], rock: ["Rock", "Рок"], chill: ["Chill", "Расслабленность"],
+		"post-punk": ["Post-punk", "Постпанк"], energetic: ["Energetic", "Энергия"], sad: ["Sad", "Грусть"],
+		soundtrack: ["Soundtracks", "Саундтреки"], nostalgia: ["Nostalgia", "Ностальгия"], aggressive: ["Aggressive", "Агрессия"],
+		indie: ["Indie", "Инди"], electronic: ["Electronic", "Электроника"], "j-pop": ["J-Pop", "J-Pop"], classy: ["Classy", "Стиль"],
+		funny: ["Funny", "Смех"], soul: ["Soul", "Соул"], beats: ["Beats", "Ритмы"], "hip hop": ["Hip hop", "Хип-хоп"], rap: ["Rap", "Рэп"],
+		pop: ["Pop", "Поп"], metal: ["Metal", "Метал"], punk: ["Punk", "Панк"], jazz: ["Jazz", "Джаз"], house: ["House", "Хаус"],
+		techno: ["Techno", "Техно"], classical: ["Classical", "Классика"], acoustic: ["Acoustic", "Акустика"], happy: ["Happy", "Радость"],
+		romantic: ["Romantic", "Романтика"], upbeat: ["Upbeat", "Бодрость"], mellow: ["Mellow", "Мягкость"], dance: ["Dance", "Танцы"],
+		emo: ["Emo", "Эмо"], funk: ["Funk", "Фанк"], ambient: ["Ambient", "Эмбиент"], love: ["Love", "Любовь"], angry: ["Angry", "Злость"],
+		calm: ["Calm", "Спокойствие"], trap: ["Trap", "Трэп"], shoegaze: ["Shoegaze", "Шугейз"], synthwave: ["Synthwave", "Синтвейв"], edm: ["EDM", "EDM"],
+	};
+	async function fallbackTags() {
+		const [total, ...counts] = await Promise.all([moodCount([]), ...Object.keys(MOODS).map((tag) => moodCount([tag]))]);
+		if (!total) return null;
+		return Object.keys(MOODS)
+			.map((tag, i) => ({ tag, name: MOODS[tag][lang === "ru" ? 1 : 0], n: counts[i] }))
+			.filter((m) => m.n >= 5 && m.n < total) // an ignored filter returns everything
+			.sort((a, b) => b.n - a.n)
+			.slice(0, 15)
+			.map(({ tag, name }) => ({ tag, name }));
+	}
+	const moodCount = async (tags) => (await moodQuery(tags).catch(() => null))?.data?.item?.length ?? 0;
+
 	// Spotify's Liked Songs mood chips are descriptor filters; the same filter works on any playlist.
-	async function moodUris(tag) {
-		// shortcut: private client (the one LibraryAPI.getTracks uses); re-check if Spotify renames it
-		const r = await P.LibraryAPI._playlistDataClient.get({
+	// shortcut: private client (the one LibraryAPI.getTracks uses); re-check if Spotify renames it
+	const moodQuery = async (tags) =>
+		P.LibraryAPI._playlistDataClient.get({
 			uri: await ensure("library"),
 			policy: { track: { track: { link: true } } },
-			query: { range: { start: 0, length: 99999 }, descriptorFilter: [tag] },
+			query: { range: { start: 0, length: 99999 }, descriptorFilter: tags },
 		});
-		return new Set(r.data.item.map((i) => i.trackMetadata?.link).filter(Boolean));
-	}
+	const moodUris = async (tag) => new Set((await moodQuery([tag])).data.item.map((i) => i.trackMetadata?.link).filter(Boolean));
 
 	async function load() {
 		const pl = await ensure("library");

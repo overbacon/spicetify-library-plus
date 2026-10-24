@@ -10,7 +10,7 @@ Your whole Spotify library as one playlist.
 - **Library+ page** (icon in the top bar):
   - play in order, Shuffle, Smart Shuffle, Shuffle+ (true random);
   - search across tracks and albums;
-  - **mood filters**: Spotify's Liked Songs chips (Rock, Chill, Sad…) applied to the whole library;
+  - **mood filters**: Spotify's Liked Songs chips (Rock, Chill, Sad…) applied to the whole library. Spotify gives these chips only to some accounts; when it gives none, Library+ tries its own set of about 40 moods and genres on your library and shows the 15 that fit most tracks;
   - sorting by date added, title, artist, album or duration (albums: date added, title or artist). Sorting is remembered;
   - the × on a track row takes it out of My Library (the like and the album stay). Tracks you delete from the playlist in Spotify itself stay out too, instead of coming back at the next sync. The small “Removed: N” link shows them as tiles: click one to bring it back;
   - **No Liked Songs** toggle: hides your liked tracks and skips them on every tab, so you hear only what you haven't liked yet. It stays on until you switch it off;
