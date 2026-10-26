@@ -81,6 +81,13 @@ const LIBRARY_PLUS_STRINGS = {
 		backToRemoved: "All removed",
 		otherAlbum: "Other tracks",
 		bringBackAlbum: "Bring back this album's tracks",
+		progressOf: "{0} of {1}",
+		heardOf: "Listened {0} of {1}",
+		resume: "Continue: {0}",
+		fromStart: "From the start",
+		resetProgress: "Reset progress",
+		stoppedHere: "you stopped here",
+		heardTrack: "listened",
 		nothingRemoved: "Nothing removed.",
 		removedHint: "These tracks stay out of My Library, grouped by album. Tracks you delete from the playlist in Spotify land here too.",
 		bringBack: "Bring back",
@@ -149,6 +156,13 @@ const LIBRARY_PLUS_STRINGS = {
 		backToRemoved: "Все убранные",
 		otherAlbum: "Другие треки",
 		bringBackAlbum: "Вернуть треки этого альбома",
+		progressOf: "{0} из {1}",
+		heardOf: "Прослушано {0} из {1}",
+		resume: "Продолжить: {0}",
+		fromStart: "С начала",
+		resetProgress: "Сбросить прогресс",
+		stoppedHere: "остановились здесь",
+		heardTrack: "прослушан",
 		nothingRemoved: "Ничего не убрано.",
 		removedHint: "Эти треки не попадают в «Мою библиотеку», по альбомам. Сюда же попадают треки, которые вы удалили из плейлиста прямо в Spotify.",
 		bringBack: "Вернуть",
@@ -348,12 +362,72 @@ const LIBRARY_PLUS_STRINGS = {
 	async function getLater() {
 		const pl = await existing("later");
 		const albums = new Map();
+		const progress = getProgress();
 		for (const tr of pl ? await contents(pl) : []) {
 			const a = tr.album;
-			if (a && !albums.has(a.uri)) albums.set(a.uri, { uri: a.uri, name: a.name, artists: a.artist ? [a.artist] : tr.artists, images: a.images });
+			if (!a) continue;
+			if (!albums.has(a.uri)) {
+				const p = progress[a.uri];
+				albums.set(a.uri, { uri: a.uri, name: a.name, artists: a.artist ? [a.artist] : tr.artists, images: a.images, total: 0, heard: Object.keys(p?.heard ?? {}).length, last: p?.last ?? null });
+			}
+			albums.get(a.uri).total++;
 		}
 		laterSet = new Set(albums.keys());
-		return [...albums.values()];
+		return [...albums.values()].map((a) => ({ ...a, heard: Math.min(a.heard, a.total) }));
+	}
+
+	// ---------- "Listen later" progress: which tracks were heard and where you stopped ----------
+	// Counts plays from anywhere (album page, the later playlist, Library+). Albums stay on the shelf.
+	// shortcut: kept on this computer only, like the removed list
+	const KEY_PROGRESS = "library-plus:later-progress"; // {albumUri: {heard: {trackUri: true}, last: {uri, pos, at}}}
+	const getProgress = () => readJSON(KEY_PROGRESS, {});
+	function noteListening() {
+		const st = P.PlayerAPI.getState();
+		const item = st?.item;
+		const album = item?.album?.uri;
+		if (!item || st.isPaused || !album || !laterSet.has(album)) return;
+		const pos = S.Player.getProgress();
+		const dur = item.duration?.milliseconds ?? 0;
+		const all = getProgress();
+		const p = (all[album] ??= { heard: {}, last: null });
+		// "heard" = half the track or 4 minutes, the rule Last.fm uses for a scrobble
+		const heardNow = dur > 0 && pos >= Math.min(dur / 2, 240000) && !p.heard[item.uri];
+		if (heardNow) p.heard[item.uri] = true;
+		p.last = { uri: item.uri, pos, at: Date.now() };
+		S.LocalStorage.set(KEY_PROGRESS, JSON.stringify(all));
+		if (heardNow) changed();
+	}
+	setInterval(noteListening, 5000);
+
+	const albumDetailCache = new Map();
+	async function laterAlbum(uri) {
+		if (!albumDetailCache.has(uri)) {
+			const { data, errors } = await S.GraphQL.Request(S.GraphQL.Definitions.queryAlbumTracks, { uri, offset: 0, limit: 300 });
+			if (errors) throw new Error(errors[0].message);
+			const u = data.albumUnion;
+			albumDetailCache.set(
+				uri,
+				(u.tracksV2 ?? u.tracks).items.map(({ track }) => ({
+					uri: track.uri,
+					name: track.name,
+					artists: (track.artists?.items ?? []).map((a) => a.profile?.name).join(", "),
+					duration: track.duration?.totalMilliseconds ?? 0,
+					playable: track.playability?.playable !== false,
+				}))
+			);
+		}
+		const p = getProgress()[uri] ?? { heard: {}, last: null };
+		return { tracks: albumDetailCache.get(uri), heard: p.heard, last: p.last };
+	}
+	async function playLaterFrom(album, track, pos = 0) {
+		await P.ContextualShuffleAPI.setContextualShuffleMode(album, SHUFFLE_MODE.order); // continue in album order
+		await P.PlayerAPI.play({ uri: album }, FEATURE, { skipTo: { uri: track }, ...(pos > 5000 && { seekTo: pos - 3000 }) }); // a few seconds back
+	}
+	function resetLaterProgress(uri) {
+		const all = getProgress();
+		delete all[uri];
+		S.LocalStorage.set(KEY_PROGRESS, JSON.stringify(all));
+		changed();
 	}
 	async function addLater(uri) {
 		const pl = await ensure("later");
@@ -364,6 +438,8 @@ const LIBRARY_PLUS_STRINGS = {
 		const pl = await existing("later");
 		if (pl) await removeRows(pl, (await contents(pl)).filter((tr) => tr.album?.uri === uri));
 		laterSet.delete(uri);
+		const all = getProgress();
+		if (all[uri]) delete all[uri], S.LocalStorage.set(KEY_PROGRESS, JSON.stringify(all));
 		changed();
 	}
 	async function toLater(uri) {
@@ -667,6 +743,9 @@ const LIBRARY_PLUS_STRINGS = {
 		moodUris,
 		excludeTrack,
 		restoreTracks,
+		laterAlbum,
+		playLaterFrom,
+		resetLaterProgress,
 		playUri,
 		toAlbums,
 		removeLater,

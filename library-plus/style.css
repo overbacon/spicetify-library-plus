@@ -216,6 +216,9 @@
 	background: rgba(var(--spice-rgb-text), 0.1);
 	outline: none;
 }
+.lp-card-cover {
+	position: relative;
+}
 .lp-card img {
 	width: 100%;
 	aspect-ratio: 1;
@@ -311,4 +314,36 @@
 }
 .lp-row-removed {
 	grid-template-columns: 32px 40px minmax(0, 1fr) auto;
+}
+
+/* Listen later progress */
+.lp-progress {
+	position: absolute;
+	left: 8px;
+	right: 8px;
+	bottom: 16px;
+	height: 4px;
+	border-radius: 2px;
+	background: rgba(var(--spice-rgb-shadow, 0, 0, 0), 0.6);
+	overflow: hidden;
+}
+.lp-progress > div {
+	height: 100%;
+	background: var(--spice-button);
+}
+.lp-later-actions {
+	display: inline-flex;
+	gap: 8px;
+}
+.lp-row-later {
+	grid-template-columns: 32px 24px minmax(0, 1fr) 48px;
+}
+.lp-heard {
+	color: var(--spice-button);
+}
+.lp-row-later.is-heard .lp-title span:first-child {
+	color: var(--spice-subtext);
+}
+.lp-stopped {
+	color: var(--spice-button);
 }

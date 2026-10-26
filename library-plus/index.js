@@ -83,13 +83,15 @@ function NativeMenu({ menu, render }) {
 
 // Spotify's own menu for an album of the later shelf would lack our actions (Spicetify only adds extension items to
 // menus Spotify opens itself), so this one is built from Spotify's Menu parts and looks the same.
-function LaterMenu({ LP, uri }) {
+function LaterMenu({ LP, uri, last }) {
 	const { Menu, MenuItem } = Spicetify.ReactComponent;
 	const { t } = LP;
 	return h(
 		Menu,
 		null,
-		h(MenuItem, { onClick: () => LP.playUri(uri) }, t("playAlbum")),
+		last && h(MenuItem, { onClick: () => LP.playLaterFrom(uri, last.uri, last.pos) }, t("resume", "")),
+		h(MenuItem, { onClick: () => LP.playUri(uri) }, t(last ? "fromStart" : "playAlbum")),
+		last && h(MenuItem, { onClick: () => LP.resetLaterProgress(uri) }, t("resetProgress")),
 		h(MenuItem, { onClick: () => LP.toAlbums(uri) }, t("toAlbums")),
 		h(MenuItem, { onClick: () => LP.removeLater(uri) }, t("removeLater")),
 		h(MenuItem, { onClick: () => go(uri) }, t("openAlbum"))
@@ -97,20 +99,89 @@ function LaterMenu({ LP, uri }) {
 }
 
 // Spotify-style album tile: cover, title, "Single • artist". No buttons; click opens it, right-click for the menu.
-function AlbumCard({ t, LP, later, uri, name, artists, images, albumType }) {
+// On the Listen later shelf (onOpen given) a tile shows listening progress and opens the album view.
+function AlbumCard({ t, LP, onOpen, uri, name, artists, images, albumType, total, heard, last }) {
 	const kind = albumType === "single" ? `${t("single")} • ` : albumType === "ep" ? "EP • " : "";
+	const sub = kind + names(artists) + (onOpen && heard ? ` • ${t("progressOf", heard, total)}` : "");
+	const open = onOpen ? () => onOpen(uri) : () => go(uri);
 	const { AlbumMenu, Menu, MenuItem } = Spicetify.ReactComponent;
 	return h(NativeMenu, {
-		menu: later ? Menu && MenuItem && h(LaterMenu, { LP, uri }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: artists?.[0]?.uri }),
+		menu: onOpen ? Menu && MenuItem && h(LaterMenu, { LP, uri, last }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: artists?.[0]?.uri }),
 		render: (onContextMenu, ref) =>
 			h(
 				"div",
-				{ className: "lp-card", onContextMenu, ref, role: "link", tabIndex: 0, onClick: () => go(uri), onKeyDown: (e) => e.key === "Enter" && go(uri) },
-				h("img", { src: img(images, "standard"), alt: "", loading: "lazy" }),
+				{ className: "lp-card", onContextMenu, ref, role: "link", tabIndex: 0, onClick: open, onKeyDown: (e) => e.key === "Enter" && open() },
+				h(
+					"div",
+					{ className: "lp-card-cover" },
+					h("img", { src: img(images, "standard"), alt: "", loading: "lazy" }),
+					onOpen && (heard || last) ? h("div", { className: "lp-progress" }, h("div", { style: { width: `${Math.round((heard / Math.max(total, 1)) * 100)}%` } })) : null
+				),
 				h("div", { className: "lp-card-name", title: name }, name),
-				h("div", { className: "lp-card-artist", title: kind + names(artists) }, kind + names(artists))
+				h("div", { className: "lp-card-artist", title: sub }, sub)
 			),
 	});
+}
+
+// Listen later album view: every track with a mark for listened ones and for where you stopped, plus Continue.
+function LaterAlbum({ LP, album, ver, close }) {
+	const { t } = LP;
+	const [d, setD] = useState(null);
+	useEffect(() => {
+		let live = true;
+		LP.laterAlbum(album.uri).then((x) => live && setD(x), () => {});
+		return () => {
+			live = false;
+		};
+	}, [album.uri, ver]);
+	const heard = d ? d.tracks.filter((tr) => d.heard[tr.uri]).length : album.heard;
+	const lastTrack = d?.last && d.tracks.find((tr) => tr.uri === d.last.uri);
+	return h(
+		React.Fragment,
+		null,
+		h(
+			"div",
+			{ className: "lp-moods" },
+			h(Btn, { label: "‹ " + t("tabLater"), onClick: close }),
+			h("span", { className: "lp-removed-title" }, album.name),
+			h("span", { className: "lp-muted" }, names(album.artists)),
+			d && h("span", { className: "lp-muted" }, "· " + t("heardOf", heard, d.tracks.length)),
+			h(
+				"span",
+				{ className: "lp-push lp-later-actions" },
+				lastTrack && h(Btn, { icon: "play", label: t("resume", `${lastTrack.name} (${time(d.last.pos) || "0:00"})`), onClick: () => LP.playLaterFrom(album.uri, d.last.uri, d.last.pos) }),
+				h(Btn, { label: t("fromStart"), onClick: () => d?.tracks[0] && LP.playLaterFrom(album.uri, d.tracks[0].uri) }),
+				d?.last && h(Btn, { label: t("resetProgress"), onClick: () => LP.resetLaterProgress(album.uri) })
+			)
+		),
+		h(
+			"div",
+			{ className: "lp-list" },
+			(d?.tracks ?? []).map((tr, i) =>
+				h(
+					"div",
+					{
+						key: tr.uri,
+						className: `lp-row lp-row-later ${d.heard[tr.uri] ? "is-heard" : ""} ${tr.playable ? "" : "is-disabled"}`,
+						role: "button",
+						tabIndex: 0,
+						title: t("rowTitle"),
+						onDoubleClick: () => LP.playLaterFrom(album.uri, tr.uri),
+						onKeyDown: (e) => e.key === "Enter" && LP.playLaterFrom(album.uri, tr.uri),
+					},
+					h("span", { className: "lp-num" }, i + 1),
+					h("span", { className: "lp-heard", title: d.heard[tr.uri] ? t("heardTrack") : "" }, d.heard[tr.uri] ? h(Icon, { name: "check" }) : null),
+					h(
+						"div",
+						{ className: "lp-title" },
+						h("span", null, tr.name),
+						h("span", { className: "lp-muted" }, tr.artists, d.last?.uri === tr.uri ? h("span", { className: "lp-stopped" }, ` · ${t("stoppedHere")} ${time(d.last.pos)}`) : null)
+					),
+					h("span", { className: "lp-muted lp-dur" }, time(tr.duration))
+				)
+			)
+		)
+	);
 }
 
 // "Removed" tab: removed tracks grouped by album, as Spotify-style tiles; a tile opens just that album's removed tracks.
@@ -216,8 +287,9 @@ function Page({ LP }) {
 	const [sort, setSort] = usePersisted("sort", "added");
 	const [albumSort, setAlbumSort] = usePersisted("album-sort", "added");
 	const [limit, setLimit] = useState(200);
-	const [gone, setGone] = useState(() => new Set());
-	const [removedAlbum, setRemovedAlbum] = useState(null); // album opened inside the Removed tab // rows hidden on click, until fresh data (which excludes them) arrives
+	const [gone, setGone] = useState(() => new Set()); // rows hidden on click, until fresh data (which excludes them) arrives
+	const [removedAlbum, setRemovedAlbum] = useState(null); // album opened inside the Removed tab
+	const [laterAlbum, setLaterAlbum] = useState(null); // album opened inside the Listen later tab
 	const [noLikedFlag, setNoLikedFlag] = usePersisted("no-liked", "0");
 	const noLiked = noLikedFlag === "1";
 
@@ -265,6 +337,7 @@ function Page({ LP }) {
 	const subset = filtered ? uris : undefined; // what the shuffles play
 	const ordered = filtered || SORTS[sort] ? uris : undefined; // what "in order" plays
 	const shelf = tab === "albums" ? albums : tab === "later" ? later : null;
+	const laterOpen = tab === "later" ? data.later.find((a) => a.uri === laterAlbum) : null;
 	const removedGroups = groupRemoved(data.removed.filter((it) => !gone.has(it.uri) && match(it.name, it.artist, it.albumName)));
 	const removedOpen = removedGroups.find((g) => g.key === removedAlbum);
 	const removedUris = (removedOpen ? removedOpen.items : removedGroups.flatMap((g) => g.items)).map((it) => it.uri);
@@ -275,9 +348,9 @@ function Page({ LP }) {
 			? LP.play(mode, removedUris)
 			: !shelf
 			? LP.play(mode, mode === "order" ? ordered : subset)
-			: tab === "later" && !q && !skip && !ALBUM_SORTS[albumSort] && later.length
+			: tab === "later" && !laterOpen && !q && !skip && !ALBUM_SORTS[albumSort] && later.length
 				? LP.play(mode, undefined, undefined, "later") // the whole later playlist as it is
-				: LP.playAlbums(mode, shelf.map((a) => a.uri), skip);
+				: LP.playAlbums(mode, (laterOpen ? [laterOpen] : shelf).map((a) => a.uri), skip);
 
 	const header = h(
 		"header",
@@ -394,6 +467,8 @@ function Page({ LP }) {
 			h("div", { className: "lp-list" }, rows),
 			tracks.length > limit && h(Btn, { label: t("more", tracks.length - limit), onClick: () => setLimit(limit + 200), className: "lp-more" })
 		);
+	} else if (laterOpen) {
+		body = h(LaterAlbum, { LP, album: laterOpen, ver, close: () => setLaterAlbum(null) });
 	} else if (tab === "removed") {
 		body = h(RemovedTab, { LP, groups: removedGroups, open: removedOpen, setOpen: setRemovedAlbum, restore });
 	} else {
@@ -409,7 +484,7 @@ function Page({ LP }) {
 			h(
 				"div",
 				{ className: "lp-grid" },
-				shelf.map((a) => h(AlbumCard, { key: a.uri, t, LP, later: tab === "later", ...a }))
+				shelf.map((a) => h(AlbumCard, { key: a.uri, t, LP, onOpen: tab === "later" ? setLaterAlbum : null, ...a }))
 			)
 		);
 	}

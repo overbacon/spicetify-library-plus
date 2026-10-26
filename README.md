@@ -17,7 +17,7 @@ Your whole Spotify library as one playlist.
   - right-click a track or album for Spotify's own menu.
 
   The buttons play what the open tab shows: the library, the filtered or sorted list, or the albums on a shelf. Smart Shuffle works everywhere too. A list that isn't a whole playlist is written into a third private playlist, “Library+ · Now Playing”, and played from there. Library+ pins it after your own pins and gives it a fixed cover, so it doesn't jump around the sidebar.
-- **Album shelves.** “Albums” = your saved albums; their tracks are part of the library. “Listen later” = albums put aside for later. They are not played with the library and live in a second private playlist, so you see them on your phone too. Albums are shown as Spotify-style tiles: click to open, right-click for the menu.
+- **Album shelves.** “Albums” = your saved albums; their tracks are part of the library. “Listen later” = albums put aside for later. They are not played with the library and live in a second private playlist, so you see them on your phone too. Albums are shown as Spotify-style tiles: click to open, right-click for the menu. Listen later keeps track of what you've heard: each tile shows a progress bar and “5 of 12”, and opening it lists the tracks with a mark for the listened ones and for where you stopped, plus **Continue** from that spot. Albums stay on the shelf until you move them.
 
 The interface is in English or Russian, depending on Spotify's language.
 
@@ -57,6 +57,6 @@ spicetify apply
 - поиск, фильтры настроений, сортировка, родное меню по правому клику;
 - переключатель «Без любимых»: лайкнутые треки скрыты и не играют ни на одной вкладке;
 - альбомы плитками, как в Spotify, с сортировкой; крестик в строке убирает трек из «Моей библиотеки», удалённые прямо в Spotify тоже не возвращаются, а вернуть их можно на вкладке «Убранные» (по альбомам);
-- полки альбомов «Альбомы» и «Послушать позже».
+- полки альбомов «Альбомы» и «Послушать позже»; на «Послушать позже» видно, сколько прослушано, какие треки и где вы остановились, и есть «Продолжить».
 
 Установка на Windows — команда выше.
