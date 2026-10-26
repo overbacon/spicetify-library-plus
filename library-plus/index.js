@@ -48,6 +48,16 @@ function Icon({ name, size = 16 }) {
 	return h("svg", { width: size, height: size, viewBox: "0 0 16 16", fill: "currentColor", dangerouslySetInnerHTML: { __html: Spicetify.SVGIcons[name] ?? "" } });
 }
 
+// Row number that turns into a play button on hover or keyboard focus, like Spotify's track lists.
+function RowNum({ n, label, onPlay }) {
+	return h(
+		"span",
+		{ className: "lp-num" },
+		h("span", { className: "lp-num-n" }, n),
+		h("button", { className: "lp-num-play", title: label, "aria-label": label, onClick: (e) => (e.stopPropagation(), onPlay()), onDoubleClick: (e) => e.stopPropagation() }, h(Icon, { name: "play" }))
+	);
+}
+
 function Btn({ icon, label, title, onClick, disabled, pressed, className = "" }) {
 	return h(
 		"button",
@@ -169,7 +179,7 @@ function LaterAlbum({ LP, album, ver, close }) {
 						onDoubleClick: () => LP.playLaterFrom(album.uri, tr.uri),
 						onKeyDown: (e) => e.key === "Enter" && LP.playLaterFrom(album.uri, tr.uri),
 					},
-					h("span", { className: "lp-num" }, i + 1),
+					h(RowNum, { n: i + 1, label: t("playTrack", tr.name), onPlay: () => LP.playLaterFrom(album.uri, tr.uri) }),
 					h("span", { className: "lp-heard", title: d.heard[tr.uri] ? t("heardTrack") : "" }, d.heard[tr.uri] ? h(Icon, { name: "check" }) : null),
 					h(
 						"div",
@@ -440,7 +450,7 @@ function Page({ LP }) {
 							onDoubleClick: () => LP.play("order", ordered, tr.uri),
 							onKeyDown: (e) => e.key === "Enter" && LP.play("order", ordered, tr.uri),
 						},
-						h("span", { className: "lp-num" }, i + 1),
+						h(RowNum, { n: i + 1, label: t("playTrack", tr.name), onPlay: () => LP.play("order", ordered, tr.uri) }),
 						h("img", { src: img(tr.album?.images, "small"), alt: "", loading: "lazy" }),
 						h("div", { className: "lp-title" }, h("span", null, tr.name), h("span", { className: "lp-muted" }, names(tr.artists))),
 						h("button", { className: "lp-link lp-muted", onClick: () => tr.album && go(tr.album.uri) }, tr.album?.name),
