@@ -49,13 +49,38 @@ function Icon({ name, size = 16 }) {
 }
 
 // Row number that turns into a play button on hover or keyboard focus, like Spotify's track lists.
-function RowNum({ n, label, onPlay }) {
+// The playing row shows an equalizer instead (still while paused); its hover button pauses / resumes instead.
+function RowNum({ n, label, onPlay, now, t }) {
+	const playing = now && !now.paused;
+	const click = (e) => (e.stopPropagation(), now ? Spicetify.Player.togglePlay() : onPlay());
+	const tip = playing ? t("pauseTrack") : label;
 	return h(
 		"span",
 		{ className: "lp-num" },
-		h("span", { className: "lp-num-n" }, n),
-		h("button", { className: "lp-num-play", title: label, "aria-label": label, onClick: (e) => (e.stopPropagation(), onPlay()), onDoubleClick: (e) => e.stopPropagation() }, h(Icon, { name: "play" }))
+		now
+			? h("span", { className: `lp-num-n lp-eq ${playing ? "" : "is-paused"}`, "aria-hidden": true }, h("i"), h("i"), h("i"))
+			: h("span", { className: "lp-num-n" }, n),
+		h("button", { className: "lp-num-play", title: tip, "aria-label": tip, onClick: click, onDoubleClick: (e) => e.stopPropagation() }, h(Icon, { name: playing ? "pause" : "play" }))
 	);
+}
+
+// What Spotify is playing right now, kept up to date from player events.
+function usePlaying() {
+	const read = () => {
+		const st = Spicetify.Platform.PlayerAPI.getState();
+		return { uri: st?.item?.uri ?? null, paused: !!st?.isPaused };
+	};
+	const [now, setNow] = useState(read);
+	useEffect(() => {
+		const update = () => setNow(read());
+		Spicetify.Player.addEventListener("songchange", update);
+		Spicetify.Player.addEventListener("onplaypause", update);
+		return () => {
+			Spicetify.Player.removeEventListener("songchange", update);
+			Spicetify.Player.removeEventListener("onplaypause", update);
+		};
+	}, []);
+	return now;
 }
 
 function Btn({ icon, label, title, onClick, disabled, pressed, className = "" }) {
@@ -136,6 +161,7 @@ function AlbumCard({ t, LP, onOpen, uri, name, artists, images, albumType, total
 // Listen later album view: every track with a mark for listened ones and for where you stopped, plus Continue.
 function LaterAlbum({ LP, album, ver, close }) {
 	const { t } = LP;
+	const now = usePlaying();
 	const [d, setD] = useState(null);
 	useEffect(() => {
 		let live = true;
@@ -172,14 +198,14 @@ function LaterAlbum({ LP, album, ver, close }) {
 					"div",
 					{
 						key: tr.uri,
-						className: `lp-row lp-row-later ${d.heard[tr.uri] ? "is-heard" : ""} ${tr.playable ? "" : "is-disabled"}`,
+						className: `lp-row lp-row-later ${d.heard[tr.uri] ? "is-heard" : ""} ${tr.playable ? "" : "is-disabled"} ${now.uri === tr.uri ? "is-playing" : ""}`,
 						role: "button",
 						tabIndex: 0,
 						title: t("rowTitle"),
 						onDoubleClick: () => LP.playLaterFrom(album.uri, tr.uri),
 						onKeyDown: (e) => e.key === "Enter" && LP.playLaterFrom(album.uri, tr.uri),
 					},
-					h(RowNum, { n: i + 1, label: t("playTrack", tr.name), onPlay: () => LP.playLaterFrom(album.uri, tr.uri) }),
+					h(RowNum, { n: i + 1, t, now: now.uri === tr.uri ? now : null, label: t("playTrack", tr.name), onPlay: () => LP.playLaterFrom(album.uri, tr.uri) }),
 					h("span", { className: "lp-heard", title: d.heard[tr.uri] ? t("heardTrack") : "" }, d.heard[tr.uri] ? h(Icon, { name: "check" }) : null),
 					h(
 						"div",
@@ -287,6 +313,7 @@ function openSortPlay(uri) {
 
 function Page({ LP }) {
 	const { t, count, state } = LP;
+	const now = usePlaying();
 	const [ver, setVer] = useState(0);
 	const [data, setData] = useState(null);
 	const [error, setError] = useState(null);
@@ -443,14 +470,14 @@ function Page({ LP }) {
 						{
 							ref,
 							onContextMenu,
-							className: `lp-row ${tr.isPlayable ? "" : "is-disabled"}`,
+							className: `lp-row ${tr.isPlayable ? "" : "is-disabled"} ${now.uri === tr.uri ? "is-playing" : ""}`,
 							role: "button",
 							tabIndex: 0,
 							title: t("rowTitle"),
 							onDoubleClick: () => LP.play("order", ordered, tr.uri),
 							onKeyDown: (e) => e.key === "Enter" && LP.play("order", ordered, tr.uri),
 						},
-						h(RowNum, { n: i + 1, label: t("playTrack", tr.name), onPlay: () => LP.play("order", ordered, tr.uri) }),
+						h(RowNum, { n: i + 1, t, now: now.uri === tr.uri ? now : null, label: t("playTrack", tr.name), onPlay: () => LP.play("order", ordered, tr.uri) }),
 						h("img", { src: img(tr.album?.images, "small"), alt: "", loading: "lazy" }),
 						h("div", { className: "lp-title" }, h("span", null, tr.name), h("span", { className: "lp-muted" }, names(tr.artists))),
 						h("button", { className: "lp-link lp-muted", onClick: () => tr.album && go(tr.album.uri) }, tr.album?.name),
