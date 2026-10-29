@@ -25,6 +25,12 @@ const ALBUM_SORTS = {
 	artist: (a, b) => cmp(names(a.artists), names(b.artists)) || cmp(a.name, b.name),
 };
 const SORT_LABEL = { added: "sortAdded", name: "sortName", artist: "sortArtist", album: "sortAlbum", duration: "sortDuration" };
+// What ▶ plays with, switched by the shuffle button like Spotify's own: off → shuffle → smart → Shuffle+
+const MODES = ["order", "shuffle", "smart", "shuffle+"];
+const MODE_ICON = { order: "shuffle", shuffle: "shuffle", smart: "smartShuffle", "shuffle+": "shuffle" };
+const MODE_LABEL = { order: "modeOrder", shuffle: "shuffle", smart: "smart", "shuffle+": "modePlus" };
+// the header's tint, also given to Spotify's top bar when scrolled so the two meet without a seam
+const TINT = "color-mix(in srgb, var(--spice-button) 22%, var(--spice-main))";
 
 // useState that survives leaving the page (Spotify unmounts it)
 function usePersisted(key, initial) {
@@ -84,6 +90,27 @@ function usePlaying() {
 	return now;
 }
 
+// Spotify's own pages fade in a solid top bar as you scroll; a custom app's stays see-through and the header shows
+// through it. This does the same for this page and gives the bar back untouched on leaving.
+function useTopBar(ref) {
+	useEffect(() => {
+		const bg = document.querySelector(".main-topBar-background");
+		// OverlayScrollbars' viewport switches to overflow: hidden while the page is short, so it is found by its attribute
+		let sc = ref.current?.closest("[data-overlayscrollbars-viewport]") ?? ref.current?.parentElement;
+		while (sc && !sc.matches("[data-overlayscrollbars-viewport]") && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
+		if (!bg || !sc) return;
+		const f = () => (bg.style.opacity = String(Math.min(1, sc.scrollTop / 160)));
+		bg.style.backgroundColor = TINT;
+		f();
+		sc.addEventListener("scroll", f, { passive: true });
+		return () => {
+			sc.removeEventListener("scroll", f);
+			bg.style.opacity = "0";
+			bg.style.backgroundColor = "";
+		};
+	}, []);
+}
+
 function Btn({ icon, label, title, onClick, disabled, pressed, className = "" }) {
 	return h(
 		"button",
@@ -91,6 +118,15 @@ function Btn({ icon, label, title, onClick, disabled, pressed, className = "" })
 		icon && h(Icon, { name: icon }),
 		label && h("span", null, label)
 	);
+}
+
+function BackBtn({ t, onClick }) {
+	return h("button", { className: "lp-back", onClick, title: t("back"), "aria-label": t("back") }, h(Icon, { name: "chevron-left" }));
+}
+
+// Centered message for an empty tab or a search with no results, like Spotify's empty pages.
+function Empty({ icon, title, text, action }) {
+	return h("div", { className: "lp-empty" }, icon && h(Icon, { name: icon, size: 48 }), h("h2", null, title), text && h("p", { className: "lp-muted" }, text), action);
 }
 
 // Spotify's own menus can throw on a future client update; that must not take the page down.
@@ -115,6 +151,83 @@ function NativeMenu({ menu, render }) {
 	const plain = render(undefined, undefined);
 	if (!RightClickMenu || !menu) return plain;
 	return h(Boundary, { fallback: plain }, h(RightClickMenu, { menu: h(Boundary, { fallback: null }, menu) }, (isOpen, onContextMenu, ref) => render(onContextMenu, ref)));
+}
+
+// A Spotify menu opened by a left click (the "…" and sort buttons). fallback is shown if Spotify lacks the parts.
+function ClickMenu({ menu, render, fallback }) {
+	const { ContextMenu } = Spicetify.ReactComponent;
+	if (!ContextMenu) return fallback;
+	return h(Boundary, { fallback }, h(ContextMenu, { trigger: "click", menu: h(Boundary, { fallback: null }, menu) }, (isOpen, onClick, ref) => render(onClick, ref)));
+}
+
+// Spotify-style sort button: the current sorting as text, a menu with the choices and a check on the current one.
+function SortMenu({ t, value, onChange, sorts }) {
+	const { Menu, MenuItem } = Spicetify.ReactComponent;
+	const select = h(SortSelect, { t, value, onChange, sorts });
+	if (!Menu || !MenuItem) return select;
+	const label = t(SORT_LABEL[value] ?? "sortAdded");
+	return h(ClickMenu, {
+		fallback: select,
+		menu: h(
+			Menu,
+			null,
+			Object.keys(sorts).map((k) => h(MenuItem, { key: k, onClick: () => onChange(k), trailingIcon: k === value ? h(Icon, { name: "check" }) : undefined }, t(SORT_LABEL[k])))
+		),
+		render: (onClick, ref) => h("button", { ref, className: "lp-sortbtn", onClick, title: t("sortBy", label), "aria-label": t("sortBy", label) }, h("span", null, label), h(Icon, { name: "list-view" })),
+	});
+}
+
+// Spotify-style search: a magnifier that opens into a field, closes again when left empty.
+function SearchBox({ t, value, onChange }) {
+	const [open, setOpen] = useState(!!value);
+	const ref = useRef();
+	const show = open || !!value;
+	useEffect(() => {
+		if (open) ref.current?.focus();
+	}, [open]);
+	return h(
+		"div",
+		{ className: `lp-searchbox ${show ? "is-open" : ""}` },
+		h("button", { className: "lp-icon-btn", title: t("search"), "aria-label": t("search"), onClick: () => (show ? ref.current?.focus() : setOpen(true)) }, h(Icon, { name: "search" })),
+		h("input", {
+			ref,
+			className: "lp-search",
+			type: "search",
+			placeholder: t("search"),
+			value,
+			tabIndex: show ? 0 : -1,
+			"aria-label": t("search"),
+			onChange: (e) => onChange(e.target.value),
+			onBlur: () => !value && setOpen(false),
+			onKeyDown: (e) => e.key === "Escape" && (onChange(""), setOpen(false), e.currentTarget.blur()),
+		})
+	);
+}
+
+// Mood chips on one line; "More" unfolds the rest when they don't fit.
+function MoodRow({ t, label, children }) {
+	const ref = useRef();
+	const [open, setOpen] = useState(false);
+	const [multi, setMulti] = useState(false);
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const check = () => {
+			const c = el.children;
+			setMulti(c.length > 1 && c[c.length - 1].offsetTop > c[0].offsetTop);
+		};
+		check();
+		const ro = new ResizeObserver(check);
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [children.length]);
+	return h(
+		"div",
+		{ className: "lp-moodrow" },
+		h("span", { className: "lp-muted" }, label),
+		h("div", { ref, className: `lp-moodchips ${open ? "is-open" : ""}` }, children),
+		multi && h("button", { className: "lp-link lp-muted lp-moods-toggle", onClick: () => setOpen(!open), "aria-expanded": open }, t(open ? "moodsLess" : "moodsMore"))
+	);
 }
 
 // One right-click menu for a whole list instead of one per row (200 rows each with their own menu took ~0.1 s to draw).
@@ -158,12 +271,13 @@ function LaterMenu({ LP, uri, last }) {
 	);
 }
 
-// Spotify-style album tile: cover, title, "Single • artist". No buttons; click opens it, right-click for the menu.
+// Spotify-style album tile: cover, title, "Single • artist", a round ▶ on hover. Click opens it, right-click for the menu.
 // On the Listen later shelf (onOpen given) a tile shows listening progress and opens the album view.
-const AlbumCard = memo(function AlbumCard({ t, onOpen, uri, name, artists, images, albumType, total, heard, last }) {
+const AlbumCard = memo(function AlbumCard({ t, onOpen, onPlay, uri, name, artists, images, albumType, total, heard, last }) {
 	const kind = albumType === "single" ? `${t("single")} • ` : albumType === "ep" ? "EP • " : "";
 	const sub = kind + names(artists) + (onOpen && heard ? ` • ${t("progressOf", heard, total)}` : "");
 	const open = onOpen ? () => onOpen(uri) : () => go(uri);
+	const tip = last ? t("resume", "").replace(/[:\s]+$/, "") : t("playAlbum");
 	return h(
 		"div",
 		{ className: "lp-card", "data-menu": uri, role: "link", tabIndex: 0, onClick: open, onKeyDown: (e) => e.key === "Enter" && open() },
@@ -171,7 +285,12 @@ const AlbumCard = memo(function AlbumCard({ t, onOpen, uri, name, artists, image
 			"div",
 			{ className: "lp-card-cover" },
 			h("img", { src: img(images, "standard"), alt: "", loading: "lazy" }),
-			onOpen && (heard || last) ? h("div", { className: "lp-progress" }, h("div", { style: { width: `${Math.round((heard / Math.max(total, 1)) * 100)}%` } })) : null
+			onOpen && (heard || last) ? h("div", { className: "lp-progress" }, h("div", { style: { width: `${Math.round((heard / Math.max(total, 1)) * 100)}%` } })) : null,
+			h(
+				"button",
+				{ className: "lp-card-play", title: tip, "aria-label": `${tip}: ${name}`, onClick: (e) => (e.stopPropagation(), onPlay(uri, last)), onKeyDown: (e) => e.stopPropagation() },
+				h(Icon, { name: "play", size: 20 })
+			)
 		),
 		h("div", { className: "lp-card-name", title: name }, name),
 		h("div", { className: "lp-card-artist", title: sub }, sub)
@@ -210,6 +329,37 @@ const TrackRow = memo(function TrackRow({ tr, i, t, now, onPlay, onExclude }) {
 	);
 });
 
+// Column titles above the track list, like Spotify's; clicking one sorts by it, clicking it again goes back to date added.
+function TrackHead({ t, sort, setSort }) {
+	const col = (key, content, className = "") =>
+		h(
+			"button",
+			{ className: `lp-th ${className} ${sort === key && key !== "added" ? "is-active" : ""}`, onClick: () => setSort(sort === key && key !== "added" ? "added" : key), title: t("sortBy", t(SORT_LABEL[key])) },
+			content
+		);
+	return h(
+		"div",
+		{ className: "lp-thead" },
+		col("added", "#", "lp-th-num"),
+		h("span"),
+		col("name", t("sortName")),
+		col("album", t("sortAlbum")),
+		col("duration", h(Icon, { name: "clock" }), "lp-th-dur"),
+		h("span")
+	);
+}
+
+// Header of an album opened inside a tab: back, title, a line under it, actions on the right.
+function SubHead({ t, close, title, sub, children }) {
+	return h(
+		"div",
+		{ className: "lp-subhead" },
+		h(BackBtn, { t, onClick: close }),
+		h("div", { className: "lp-subhead-text" }, h("span", { className: "lp-removed-title" }, title), sub && h("span", { className: "lp-muted" }, sub)),
+		h("div", { className: "lp-push lp-later-actions" }, children)
+	);
+}
+
 // Listen later album view: every track with a mark for listened ones and for where you stopped, plus Continue.
 function LaterAlbum({ LP, album, ver, close }) {
 	const { t } = LP;
@@ -228,19 +378,13 @@ function LaterAlbum({ LP, album, ver, close }) {
 		React.Fragment,
 		null,
 		h(
-			"div",
-			{ className: "lp-moods" },
-			h(Btn, { label: "‹ " + t("tabLater"), onClick: close }),
-			h("span", { className: "lp-removed-title" }, album.name),
-			h("span", { className: "lp-muted" }, names(album.artists)),
-			d && h("span", { className: "lp-muted" }, "· " + t("heardOf", heard, d.tracks.length)),
-			h(
-				"span",
-				{ className: "lp-push lp-later-actions" },
-				lastTrack && h(Btn, { icon: "play", label: t("resume", `${lastTrack.name} (${time(d.last.pos) || "0:00"})`), onClick: () => LP.playLaterFrom(album.uri, d.last.uri, d.last.pos) }),
-				h(Btn, { label: t("fromStart"), onClick: () => d?.tracks[0] && LP.playLaterFrom(album.uri, d.tracks[0].uri) }),
-				d?.last && h(Btn, { label: t("resetProgress"), onClick: () => LP.resetLaterProgress(album.uri) })
-			)
+			SubHead,
+			{ t, close, title: album.name, sub: [names(album.artists), d && t("heardOf", heard, d.tracks.length)].filter(Boolean).join(" · ") },
+			lastTrack
+				? h(Btn, { icon: "play", className: "is-primary", label: t("resume", `${lastTrack.name} (${time(d.last.pos) || "0:00"})`), onClick: () => LP.playLaterFrom(album.uri, d.last.uri, d.last.pos) })
+				: h(Btn, { icon: "play", className: "is-primary", label: t("playAlbum"), onClick: () => d?.tracks[0] && LP.playLaterFrom(album.uri, d.tracks[0].uri) }),
+			lastTrack && h(Btn, { label: t("fromStart"), onClick: () => d?.tracks[0] && LP.playLaterFrom(album.uri, d.tracks[0].uri) }),
+			d?.last && h(Btn, { label: t("resetProgress"), onClick: () => LP.resetLaterProgress(album.uri) })
 		),
 		h(
 			"div",
@@ -289,6 +433,7 @@ function RemovedTab({ LP, groups, open, setOpen, restore }) {
 	const { t, count } = LP;
 	const { Menu, MenuItem } = Spicetify.ReactComponent;
 	const all = groups.flatMap((g) => g.items.map((it) => it.uri));
+	if (!all.length) return h(Empty, { icon: "x", title: t("nothingRemoved"), text: t("removeHint") });
 	if (!open)
 		return h(
 			React.Fragment,
@@ -296,7 +441,7 @@ function RemovedTab({ LP, groups, open, setOpen, restore }) {
 			h(
 				"div",
 				{ className: "lp-moods" },
-				h("span", { className: "lp-muted" }, all.length ? t("removedHint") : t("nothingRemoved")),
+				h("span", { className: "lp-muted" }, t("removedHint")),
 				all.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => restore(all), className: "lp-push" })
 			),
 			h(
@@ -325,12 +470,9 @@ function RemovedTab({ LP, groups, open, setOpen, restore }) {
 		React.Fragment,
 		null,
 		h(
-			"div",
-			{ className: "lp-moods" },
-			h(Btn, { label: "‹ " + t("backToRemoved"), onClick: () => setOpen(null) }),
-			h("span", { className: "lp-removed-title" }, open.name || t("otherAlbum")),
-			h("span", { className: "lp-muted" }, open.artist),
-			open.items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => restore(open.items.map((it) => it.uri)), className: "lp-push" })
+			SubHead,
+			{ t, close: () => setOpen(null), title: open.name || t("otherAlbum"), sub: open.artist },
+			open.items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => restore(open.items.map((it) => it.uri)) })
 		),
 		h(
 			"div",
@@ -370,6 +512,8 @@ let lastData = null;
 function Page({ LP }) {
 	const { t, count, state } = LP;
 	const now = usePlaying();
+	const pageRef = useRef();
+	useTopBar(pageRef);
 	const [ver, setVer] = useState(0);
 	const [data, setData] = useState(() => lastData);
 	const [error, setError] = useState(null);
@@ -379,6 +523,7 @@ function Page({ LP }) {
 	const [moodSet, setMoodSet] = useState(null);
 	const [sort, setSort] = usePersisted("sort", "added");
 	const [albumSort, setAlbumSort] = usePersisted("album-sort", "added");
+	const [modePref, setModePref] = usePersisted("mode", "order");
 	const [limit, setLimit] = useState(200);
 	const [gone, setGone] = useState(() => new Set()); // rows hidden on click, until fresh data (which excludes them) arrives
 	const [removedAlbum, setRemovedAlbum] = useState(null); // album opened inside the Removed tab
@@ -388,6 +533,12 @@ function Page({ LP }) {
 	const onPlayRow = useCallback((uri) => LP.play("order", orderedRef.current, uri), []);
 	const onExcludeRow = useCallback((tr) => (setGone((g) => new Set(g).add(tr.uri)), LP.excludeTrack(tr)), []);
 	const noLiked = noLikedFlag === "1";
+	const skipRef = useRef();
+	// a tile's ▶: Listen later albums continue where you stopped; with "No Liked Songs" on, the album plays without them
+	const onPlayCard = useCallback(
+		(uri, last) => (last ? LP.playLaterFrom(uri, last.uri, last.pos) : skipRef.current ? LP.playAlbums("order", [uri], skipRef.current) : LP.playUri(uri)),
+		[]
+	);
 
 	useEffect(() => {
 		const f = () => setVer((v) => v + 1);
@@ -423,11 +574,12 @@ function Page({ LP }) {
 		return () => clearTimeout(id);
 	}, [listKey, paint, limit]);
 
-	if (!data) return h("section", { className: "lp-page" }, h("p", { className: "lp-muted" }, error ? t("error", error) : t("loading")));
+	if (!data) return h("section", { className: "lp-page", ref: pageRef }, h("p", { className: "lp-muted" }, error ? t("error", error) : t("loading")));
 
 	const q = query.trim().toLowerCase();
 	const match = (...s) => !q || s.some((x) => x?.toLowerCase().includes(q));
 	const skip = noLiked ? data.liked : null; // liked tracks hidden and not played while "No Liked Songs" is on
+	skipRef.current = skip;
 	let tracks = data.tracks.filter(
 		(tr) => !gone.has(tr.uri) && !skip?.has(tr.uri) && (!mood || moodSet?.has(tr.uri)) && match(tr.name, tr.album?.name, ...(tr.artists ?? []).map((a) => a.name))
 	);
@@ -449,8 +601,15 @@ function Page({ LP }) {
 	const removedOpen = removedGroups.find((g) => g.key === removedAlbum);
 	const removedUris = (removedOpen ? removedOpen.items : removedGroups.flatMap((g) => g.items)).map((it) => it.uri);
 	const restore = (list) => (setGone(new Set([...gone, ...list])), LP.restoreTracks(list));
-	// the buttons play what the open tab shows
-	const playTab = (mode) =>
+	const mode = modePref === "smart" && !data.canSmart ? "order" : modePref;
+	const nextMode = () => {
+		let i = MODES.indexOf(mode);
+		do i = (i + 1) % MODES.length;
+		while (MODES[i] === "smart" && !data.canSmart);
+		setModePref(MODES[i]);
+	};
+	// ▶ plays what the open tab shows
+	const playTab = () =>
 		tab === "removed"
 			? LP.play(mode, removedUris)
 			: !shelf
@@ -458,6 +617,16 @@ function Page({ LP }) {
 			: tab === "later" && !laterOpen && !q && !skip && !ALBUM_SORTS[albumSort] && later.length
 				? LP.play(mode, undefined, undefined, "later") // the whole later playlist as it is
 				: LP.playAlbums(mode, (laterOpen ? [laterOpen] : shelf).map((a) => a.uri), skip);
+	const what =
+		tab === "removed"
+			? count(removedUris.length, "tracks")
+			: laterOpen
+			? laterOpen.name
+			: shelf
+			? count(shelf.length, "albums") + (skip ? t("exceptLiked") : "")
+			: count(uris.length, "tracks");
+	const canPlay = tab === "removed" ? removedUris.length > 0 : laterOpen ? true : shelf ? shelf.length > 0 : uris.length > 0;
+	const resetFilters = () => (setQuery(""), setMood(null), setNoLikedFlag("0"));
 
 	const header = h(
 		"header",
@@ -482,24 +651,35 @@ function Page({ LP }) {
 		)
 	);
 
+	const { Menu, MenuItem } = Spicetify.ReactComponent;
+	const moreItems = [
+		[t("openPlaylist"), () => go(data.playlist)],
+		hasSortPlay() && [t("sortPlayMenu"), () => openSortPlay(tab === "later" && data.laterPlaylist ? data.laterPlaylist : data.playlist)],
+		[t("syncNow"), () => LP.sync(), state.syncing],
+	].filter(Boolean);
+	const modeTip = t("modeTitle", t(MODE_LABEL[mode]));
+	const playTip = t("playWhat", what) + (mode === "order" ? "" : ` · ${t(MODE_LABEL[mode])}`);
+	const sortFor = tab === "tracks" ? [sort, setSort, SORTS] : shelf && !laterOpen ? [albumSort, setAlbumSort, ALBUM_SORTS] : null;
 	const actions = h(
 		"div",
 		{ className: "lp-actions" },
-		h("button", { className: "lp-play", onClick: () => playTab("order"), title: t("playOrder"), "aria-label": t("playOrder") }, h(Icon, { name: "play", size: 24 })),
-		h(Btn, { icon: "shuffle", label: t("shuffle"), onClick: () => playTab("shuffle") }),
-		h(Btn, {
-			icon: "enhance",
-			label: t("smart"),
-			title: t("smartTitle"),
-			onClick: () => playTab("smart"),
-			disabled: !data.canSmart,
-		}),
-		h(Btn, { icon: "shuffle", label: "Shuffle+", title: t("shufflePlusTitle"), onClick: () => playTab("shuffle+") }),
-		h(Btn, { icon: "playlist", title: t("openPlaylist"), onClick: () => go(data.playlist) }),
-		hasSortPlay() && h(Btn, { label: "Sort Play", title: t("sortPlayTitle"), onClick: () => openSortPlay(tab === "later" && data.laterPlaylist ? data.laterPlaylist : data.playlist) }),
-		h(Btn, { icon: "repeat", title: t("syncNow"), onClick: () => LP.sync(), disabled: state.syncing }),
+		h("button", { className: "lp-play", onClick: playTab, disabled: !canPlay, title: playTip, "aria-label": playTip }, h(Icon, { name: "play", size: 24 })),
+		h(
+			"button",
+			{ className: `lp-icon-btn lp-mode ${mode === "order" ? "" : "is-on"}`, onClick: nextMode, title: modeTip, "aria-label": modeTip },
+			h(Icon, { name: MODE_ICON[mode], size: 24 }),
+			mode === "shuffle+" && h("b", { className: "lp-mode-plus", "aria-hidden": true }, "+")
+		),
+		Menu &&
+			MenuItem &&
+			h(ClickMenu, {
+				menu: h(Menu, null, moreItems.map(([label, f, off]) => h(MenuItem, { key: label, onClick: f, disabled: off }, label))),
+				fallback: moreItems.map(([label, f, off]) => h(Btn, { key: label, label, onClick: f, disabled: off })),
+				render: (onClick, ref) => h("button", { ref, className: "lp-icon-btn", onClick, title: t("moreActions"), "aria-label": t("moreActions") }, h(Icon, { name: "more", size: 24 })),
+			}),
 		h(Btn, { icon: "heart", label: t("noLiked"), title: t("noLikedTitle"), onClick: () => setNoLikedFlag(noLiked ? "0" : "1"), pressed: noLiked, className: "lp-push" }),
-		h("input", { className: "lp-search", type: "search", placeholder: t("search"), value: query, onChange: (e) => setQuery(e.target.value), "aria-label": t("search") })
+		h(SearchBox, { t, value: query, onChange: setQuery }),
+		sortFor && h(SortMenu, { t, value: sortFor[0], onChange: sortFor[1], sorts: sortFor[2] })
 	);
 
 	const tabs = h(
@@ -512,21 +692,23 @@ function Page({ LP }) {
 			(data.removed.length > 0 || tab === "removed") && ["removed", `${t("tabRemoved")} · ${removedGroups.reduce((n, g) => n + g.items.length, 0)}`],
 		].filter(Boolean).map(([id, label]) => h("button", { key: id, role: "tab", "aria-selected": tab === id, className: `lp-chip ${tab === id ? "is-active" : ""}`, onClick: () => setTab(id) }, label))
 	);
+	const noResults = h(Empty, {
+		icon: "search",
+		title: q ? t("noResults", query.trim()) : t("noMatch"),
+		action: h(Btn, { label: t("resetFilters"), onClick: resetFilters }),
+	});
 
 	let body;
 	if (tab === "tracks") {
-		const tools = h(
-			"div",
-			{ className: "lp-moods" },
-			data.tags.length > 0 && h("span", { className: "lp-muted" }, t("mood")),
-			data.tags.map((m) =>
-				h("button", { key: m.tag, className: `lp-chip small ${mood?.tag === m.tag ? "is-active" : ""}`, "aria-pressed": mood?.tag === m.tag, onClick: () => setMood(mood?.tag === m.tag ? null : m) }, m.name)
-			),
-			h(SortSelect, { t, value: sort, onChange: setSort, sorts: SORTS })
-		);
-		const hint =
-			ordered &&
-			h("p", { className: "lp-muted lp-hint" }, mood && !moodSet ? t("picking") : filtered ? t("playsOnly", count(uris.length, "tracks")) : t("playsSorted"));
+		const moods =
+			data.tags.length > 0 &&
+			h(
+				MoodRow,
+				{ t, label: t("mood") },
+				data.tags.map((m) =>
+					h("button", { key: m.tag, className: `lp-mood ${mood?.tag === m.tag ? "is-active" : ""}`, "aria-pressed": mood?.tag === m.tag, onClick: () => setMood(mood?.tag === m.tag ? null : m) }, m.name)
+				)
+			);
 		const shown = tracks.slice(0, Math.min(limit, paint));
 		const rows = shown.map((tr, i) => h(TrackRow, { key: tr.uid || tr.uri, tr, i, t, now: now.uri === tr.uri ? now : null, onPlay: onPlayRow, onExclude: onExcludeRow }));
 		// saveTrackUri unlocks "Add to playlist" / "Save to Liked Songs"; no uid, so no "Remove" (sync would undo it)
@@ -538,42 +720,40 @@ function Page({ LP }) {
 		body = h(
 			React.Fragment,
 			null,
-			tools,
-			hint,
-			h(SharedMenu, { className: "lp-list", menuFor: trackMenu }, rows),
+			moods,
+			mood && !moodSet
+				? h("p", { className: "lp-muted lp-hint" }, t("picking"))
+				: tracks.length
+				? h(React.Fragment, null, h(TrackHead, { t, sort, setSort }), h(SharedMenu, { className: "lp-list", menuFor: trackMenu }, rows))
+				: noResults,
 			tracks.length > limit && h(Btn, { label: t("more", tracks.length - limit), onClick: () => setLimit(limit + 200), className: "lp-more" })
 		);
 	} else if (laterOpen) {
 		body = h(LaterAlbum, { LP, album: laterOpen, ver, close: () => setLaterAlbum(null) });
 	} else if (tab === "removed") {
 		body = h(RemovedTab, { LP, groups: removedGroups, open: removedOpen, setOpen: setRemovedAlbum, restore });
+	} else if (!shelf.length) {
+		const source = tab === "later" ? data.later : data.albums;
+		body = source.length
+			? noResults
+			: h(Empty, { icon: "album", title: t(tab === "later" ? "emptyLaterTitle" : "emptyAlbumsTitle"), text: t(tab === "later" ? "emptyLater" : "emptyAlbums") });
 	} else {
 		body = h(
-			React.Fragment,
-			null,
-			h(
-				"div",
-				{ className: "lp-moods" },
-				h("span", { className: "lp-muted" }, shelf.length ? t("playsShelf", count(shelf.length, "albumsOf")) + (skip ? t("exceptLiked") : "") : t(tab === "later" ? "emptyLater" : "emptyAlbums")),
-				h(SortSelect, { t, value: albumSort, onChange: setAlbumSort, sorts: ALBUM_SORTS })
-			),
-			h(
-				SharedMenu,
-				{
-					className: "lp-grid",
-					menuFor: (uri) => {
-						const a = shelf.find((x) => x.uri === uri);
-						const { AlbumMenu, Menu, MenuItem } = Spicetify.ReactComponent;
-						if (!a) return null;
-						return tab === "later" ? Menu && MenuItem && h(LaterMenu, { LP, uri, last: a.last }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: a.artists?.[0]?.uri });
-					},
+			SharedMenu,
+			{
+				className: "lp-grid",
+				menuFor: (uri) => {
+					const a = shelf.find((x) => x.uri === uri);
+					const { AlbumMenu } = Spicetify.ReactComponent;
+					if (!a) return null;
+					return tab === "later" ? Menu && MenuItem && h(LaterMenu, { LP, uri, last: a.last }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: a.artists?.[0]?.uri });
 				},
-				shelf.map((a) => h(AlbumCard, { key: a.uri, t, onOpen: tab === "later" ? setLaterAlbum : null, ...a }))
-			)
+			},
+			shelf.map((a) => h(AlbumCard, { key: a.uri, t, onOpen: tab === "later" ? setLaterAlbum : null, onPlay: onPlayCard, ...a }))
 		);
 	}
 
-	return h("section", { className: "lp-page" }, header, actions, tabs, body);
+	return h("section", { className: "lp-page", ref: pageRef }, header, actions, tabs, body);
 }
 
 // The page can open before extension.js has finished starting (e.g. Spotify restored this page on launch).

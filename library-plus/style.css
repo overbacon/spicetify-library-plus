@@ -1,7 +1,19 @@
 /* Colors come from the active Spicetify theme (--spice-*), so the page matches whatever theme is applied. */
 .lp-page {
+	position: relative;
+	isolation: isolate;
 	padding: 32px 32px 64px;
 	color: var(--spice-text);
+}
+/* tint behind the header that fades into the page, like Spotify's playlist pages (theme accent instead of the cover color) */
+.lp-page::before {
+	content: "";
+	position: absolute;
+	z-index: -1;
+	inset: 0 0 auto;
+	height: 440px;
+	background: linear-gradient(color-mix(in srgb, var(--spice-button) 22%, var(--spice-main)), var(--spice-main));
+	pointer-events: none;
 }
 .lp-muted {
 	color: var(--spice-subtext);
@@ -43,8 +55,8 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 12px;
-	margin-bottom: 20px;
+	gap: 8px 16px;
+	margin-bottom: 24px;
 }
 .lp-play {
 	display: grid;
@@ -58,8 +70,88 @@
 	cursor: pointer;
 	transition: transform 0.1s ease;
 }
-.lp-play:hover {
+.lp-play:hover:not(:disabled) {
 	transform: scale(1.05);
+}
+.lp-play:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+/* borderless icon buttons of the action row (shuffle mode, "…", search), like Spotify's */
+.lp-icon-btn {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: none;
+	color: var(--spice-subtext);
+	cursor: pointer;
+	transition: color 0.15s ease, transform 0.1s ease;
+}
+.lp-icon-btn:hover,
+.lp-icon-btn:focus-visible {
+	color: var(--spice-text);
+	transform: scale(1.04);
+}
+.lp-mode.is-on {
+	color: var(--spice-button);
+}
+.lp-mode.is-on::after {
+	content: "";
+	position: absolute;
+	bottom: 2px;
+	left: 50%;
+	width: 4px;
+	height: 4px;
+	margin-left: -2px;
+	border-radius: 50%;
+	background: currentColor;
+}
+.lp-mode-plus {
+	position: absolute;
+	top: 4px;
+	right: 2px;
+	font-size: 13px;
+	line-height: 1;
+}
+/* Spotify-style "Date added ☰" sort button */
+.lp-sortbtn {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	height: 32px;
+	padding: 0 4px;
+	border: 0;
+	background: none;
+	color: var(--spice-subtext);
+	font: inherit;
+	font-size: 14px;
+	cursor: pointer;
+}
+.lp-sortbtn:hover,
+.lp-sortbtn:focus-visible {
+	color: var(--spice-text);
+}
+/* search: a magnifier that opens into a field */
+.lp-searchbox {
+	display: inline-flex;
+	align-items: center;
+	border-radius: 4px;
+	transition: background-color 0.2s ease;
+}
+.lp-searchbox .lp-icon-btn {
+	width: 32px;
+	height: 32px;
+}
+.lp-searchbox.is-open {
+	background: rgba(var(--spice-rgb-text), 0.1);
+}
+.lp-searchbox.is-open .lp-icon-btn:hover {
+	transform: none;
 }
 .lp-btn {
 	display: inline-flex;
@@ -84,19 +176,35 @@
 	cursor: default;
 }
 .lp-search {
-	margin-left: auto;
-	width: 280px;
-	max-width: 100%;
-	padding: 8px 12px;
-	border: 1px solid transparent;
-	border-radius: 4px;
-	background: rgba(var(--spice-rgb-text), 0.1);
+	width: 0;
+	height: 32px;
+	padding: 0;
+	border: 0;
+	background: none;
 	color: var(--spice-text);
 	font: inherit;
+	font-size: 14px;
+	transition: width 0.2s ease, padding 0.2s ease;
+}
+.lp-searchbox.is-open .lp-search {
+	width: 200px;
+	padding-right: 8px;
 }
 .lp-search:focus {
 	outline: none;
-	border-color: var(--spice-text);
+}
+.lp-search::placeholder {
+	color: var(--spice-subtext);
+	opacity: 1;
+}
+.lp-searchbox:focus-within {
+	box-shadow: 0 0 0 1px rgba(var(--spice-rgb-text), 0.6);
+}
+@media (prefers-reduced-motion: reduce) {
+	.lp-search,
+	.lp-searchbox {
+		transition: none;
+	}
 }
 
 .lp-tabs,
@@ -133,9 +241,10 @@
 	font-size: 13px;
 }
 
-.lp-row {
+.lp-row,
+.lp-thead {
 	display: grid;
-	grid-template-columns: 32px 40px minmax(0, 2fr) minmax(0, 1fr) 48px 32px;
+	grid-template-columns: 32px 40px minmax(0, 4fr) minmax(0, 3fr) 48px 32px;
 	align-items: center;
 	gap: 12px;
 	padding: 6px 8px;
@@ -272,8 +381,186 @@
 .lp-push {
 	margin-left: auto;
 }
-.lp-push + .lp-search {
-	margin-left: 0;
+.lp-btn.is-primary {
+	border-color: var(--spice-button);
+	background: var(--spice-button);
+	color: var(--spice-main);
+	font-weight: 700;
+}
+.lp-btn.is-primary:hover:not(:disabled) {
+	border-color: var(--spice-button);
+	filter: brightness(1.08);
+}
+
+/* mood filter: outlined chips on one line (tabs above are filled, so the two read as different things) */
+.lp-moodrow {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	margin-bottom: 16px;
+	font-size: 13px;
+}
+.lp-moodrow > .lp-muted {
+	flex: none;
+	line-height: 28px;
+}
+.lp-moodchips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	min-width: 0;
+	max-height: 28px;
+	overflow: hidden;
+}
+.lp-moodchips.is-open {
+	max-height: none;
+}
+.lp-mood {
+	height: 28px;
+	padding: 0 12px;
+	border: 1px solid rgba(var(--spice-rgb-subtext), 0.5);
+	border-radius: 500px;
+	background: none;
+	color: var(--spice-text);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+.lp-mood:hover,
+.lp-mood:focus-visible {
+	border-color: var(--spice-text);
+}
+.lp-mood.is-active {
+	border-color: var(--spice-button);
+	background: var(--spice-button);
+	color: var(--spice-main);
+}
+.lp-moods-toggle {
+	flex: none;
+	line-height: 28px;
+	font-size: 13px;
+	font-weight: 700;
+}
+
+/* column titles above the track list */
+.lp-thead {
+	gap: 12px;
+	padding: 0 8px 8px;
+	margin-bottom: 8px;
+	border-bottom: 1px solid rgba(var(--spice-rgb-text), 0.1);
+}
+.lp-th {
+	justify-self: start;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--spice-subtext);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+.lp-th:hover,
+.lp-th:focus-visible {
+	color: var(--spice-text);
+}
+.lp-th.is-active {
+	color: var(--spice-button);
+}
+.lp-th-num,
+.lp-th-dur {
+	justify-self: end;
+}
+
+/* empty tab / nothing found */
+.lp-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 64px 16px;
+	text-align: center;
+	color: var(--spice-subtext);
+}
+.lp-empty h2 {
+	margin: 8px 0 0;
+	color: var(--spice-text);
+	font-size: 24px;
+	font-weight: 700;
+}
+.lp-empty p {
+	max-width: 420px;
+	margin: 0 0 8px;
+}
+
+/* album opened inside a tab: round back button, title, actions */
+.lp-subhead {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 16px;
+	margin-bottom: 16px;
+}
+.lp-subhead-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+.lp-subhead-text .lp-muted {
+	font-size: 13px;
+}
+.lp-back {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: rgba(var(--spice-rgb-text), 0.1);
+	color: var(--spice-text);
+	cursor: pointer;
+}
+.lp-back:hover,
+.lp-back:focus-visible {
+	background: rgba(var(--spice-rgb-text), 0.2);
+}
+
+/* round ▶ that rises on a tile's cover on hover, like Spotify's cards */
+.lp-card-play {
+	position: absolute;
+	right: 8px;
+	bottom: 16px;
+	display: grid;
+	place-items: center;
+	width: 48px;
+	height: 48px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--spice-button);
+	color: var(--spice-main);
+	box-shadow: 0 8px 8px rgba(var(--spice-rgb-shadow, 0, 0, 0), 0.3);
+	cursor: pointer;
+	opacity: 0;
+	transform: translateY(8px);
+	transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.lp-card:hover .lp-card-play,
+.lp-card:focus-within .lp-card-play {
+	opacity: 1;
+	transform: none;
+}
+.lp-card-play:hover {
+	transform: scale(1.04) !important;
+}
+.lp-progress ~ .lp-card-play {
+	bottom: 24px;
+}
+@media (prefers-reduced-motion: reduce) {
+	.lp-card-play {
+		transition: none;
+	}
 }
 
 .lp-row-x {
