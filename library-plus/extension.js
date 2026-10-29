@@ -618,8 +618,8 @@ const LIBRARY_PLUS_STRINGS = {
 		S.LocalStorage.set(KEY, uri);
 	}
 
-	async function setContents(pl, uris) {
-		await removeRows(pl, await contents(pl)); // cached rows are safe here: only Library+ writes this playlist
+	async function setContents(pl, uris, rows) {
+		await removeRows(pl, rows ?? (await playlistRows(pl)));
 		await P.PlaylistAPI.add(pl, uris, { after: "end" }, SILENT);
 		contentsCache.delete(pl);
 	}
@@ -629,6 +629,7 @@ const LIBRARY_PLUS_STRINGS = {
 	async function play(mode, uris, from, kind = "library") {
 		try {
 			let pl = await ensure(kind);
+			let pool = null; // the list being played, when we wrote it ourselves: no need to read it back
 			if (uris || mode === "shuffle+") {
 				let list = uris ?? (await contents(pl)).filter((tr) => tr.isPlayable).map((tr) => tr.uri);
 				if (!list.length) {
@@ -643,19 +644,20 @@ const LIBRARY_PLUS_STRINGS = {
 				const fresh = !(await existing("now"));
 				pl = await ensure("now");
 				await dressNow(pl).catch((e) => console.warn("Library+ now-playlist cover/pin", e));
-				const current = (await contents(pl)).map((tr) => tr.uri);
+				const rows = await playlistRows(pl); // light read: ~10 ms
 				// same list as last time (another row, another mode): leave the playlist alone, so the player keeps
 				// its loaded queue instead of reloading the whole context
-				if (current.length !== list.length || current.some((uri, i) => uri !== list[i])) {
-					await setContents(pl, list);
+				if (rows.length !== list.length || rows.some((r, i) => r.uri !== list[i])) {
+					await setContents(pl, list, rows);
 					// shortcut: the player can't resolve a playlist created a moment ago; only the very first run waits
 					if (fresh) await sleep(2500);
 				}
+				pool = list;
 			}
 			// play() applies the saved per-playlist mode; ShuffleAPI.setShuffle doesn't save it while the playlist is playing
 			// an explicit start track: without it Spotify just keeps going if this playlist is already playing
-			const [, rows] = await Promise.all([P.ContextualShuffleAPI.setContextualShuffleMode(pl, SHUFFLE_MODE[mode]), contents(pl)]);
-			const playable = rows.filter((tr) => tr.isPlayable);
+			const [, rows] = await Promise.all([P.ContextualShuffleAPI.setContextualShuffleMode(pl, SHUFFLE_MODE[mode]), pool ?? contents(pl)]);
+			const playable = pool ? rows.map((uri) => ({ uri })) : rows.filter((tr) => tr.isPlayable);
 			const start = from ?? playable[mode === "order" ? 0 : Math.floor(Math.random() * playable.length)]?.uri;
 			await P.PlayerAPI.play({ uri: pl }, FEATURE, start ? { skipTo: { uri: start } } : {});
 			if (mode === "smart") {
