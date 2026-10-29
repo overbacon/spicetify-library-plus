@@ -416,3 +416,13 @@
 		transform: scaleY(0.6);
 	}
 }
+
+/* rows and tiles out of view are not laid out or painted until scrolled to */
+.lp-list .lp-row {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 52px;
+}
+.lp-grid .lp-card {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 230px;
+}

@@ -253,13 +253,55 @@ const LIBRARY_PLUS_STRINGS = {
 	// Reading a 1300-track playlist takes 0.7–6 s, and play() needs one before every start. So reads are cached:
 	// our own writes drop the entry, and sync (which also runs on changes made in Spotify) always reads fresh.
 	const contentsCache = new Map();
+	// Asking only for what Library+ shows (title, artists, album, cover, length, playable) is ~7x faster than
+	// PlaylistAPI.getContents (80 vs 600 ms for 1300 tracks); items come out in its shape (checked field by field).
+	// shortcut: private client; falls back to the full read if Spotify changes it
+	const PAGE_POLICY = {
+		track: { track: { link: true, name: true, playable: true, length: true, isLocal: true }, album: { album: { link: true, name: true, covers: true }, artist: { name: true, link: true } }, artist: { name: true, link: true } },
+		item: { rowId: true, addTime: true },
+	};
+	const coversOf = (c) =>
+		c ? [["standard", c.standardLink], ["small", c.smallLink], ["large", c.largeLink], ["xlarge", c.xlargeLink]].filter(([, url]) => url).map(([label, url]) => ({ url, label })) : [];
+	function toItem(i) {
+		const m = i.trackMetadata;
+		const ar = m.album?.artist;
+		return {
+			uid: i.rowId,
+			uri: m.link,
+			name: m.name,
+			isPlayable: !!m.playable,
+			isLocal: !!m.isLocal,
+			duration: { milliseconds: m.length * 1000 }, // seconds here
+			addedAt: i.addTime ? new Date(i.addTime * 1000).toISOString() : undefined,
+			artists: (m.artist ?? []).map((a) => ({ type: "artist", uri: a.link, name: a.name })),
+			album: m.album && { type: "album", uri: m.album.link, name: m.album.name, images: coversOf(m.album.covers), artist: ar?.name ? { type: "artist", uri: ar.link, name: ar.name } : undefined },
+		};
+	}
+	async function readContents(uri) {
+		const r = await P.LibraryAPI._playlistDataClient
+			?.get({ uri, policy: PAGE_POLICY, query: { range: { start: 0, length: 99999 }, showUnavailable: true } })
+			.catch(() => null);
+		const items = r?.data?.item;
+		if (items?.every((i) => i.rowId && i.trackMetadata?.link)) return items.map(toItem);
+		return (await P.PlaylistAPI.getContents(uri, { limit: 99999 })).items;
+	}
 	function contents(uri, fresh) {
 		if (fresh || !contentsCache.has(uri)) {
-			const read = P.PlaylistAPI.getContents(uri, { limit: 99999 }).then((r) => r.items);
+			const read = readContents(uri);
 			read.catch(() => contentsCache.delete(uri));
 			contentsCache.set(uri, read);
 		}
 		return contentsCache.get(uri);
+	}
+	// Sync only needs uri + row id: this read takes ~15 ms where the full one takes ~600 ms for 1300 tracks.
+	// shortcut: private client (the one LibraryAPI.getTracks uses); falls back to the full read if it changes
+	async function playlistRows(uri) {
+		const r = await P.LibraryAPI._playlistDataClient
+			?.get({ uri, policy: { track: { track: { link: true } }, item: { rowId: true } }, query: { range: { start: 0, length: 99999 }, showUnavailable: true } })
+			.catch(() => null);
+		const items = r?.data?.item;
+		if (items?.every((i) => i.rowId && i.trackMetadata?.link)) return items.map((i) => ({ uri: i.trackMetadata.link, uid: i.rowId }));
+		return (await contents(uri, true)).map(({ uri, uid }) => ({ uri, uid }));
 	}
 	const SILENT = { silent: true }; // no "Added to …" toast for our own background writes
 	// One request each: every request waits for the server, and Spotify takes 1300+ rows at once.
@@ -303,7 +345,8 @@ const LIBRARY_PLUS_STRINGS = {
 		album: tr.album?.uri ?? "",
 		albumName: tr.album?.name ?? "",
 	});
-	const asMeta = (v) => (typeof v === "string" ? { name: v, artist: "", image: "", album: "", albumName: "" } : v);
+	const NO_META = { name: "", artist: "", image: "", album: "", albumName: "" };
+	const asMeta = (v) => (typeof v === "string" ? { ...NO_META, name: v } : v && typeof v === "object" ? { ...NO_META, ...v } : NO_META);
 	async function trackMeta(uri) {
 		const { data } = await S.GraphQL.Request(S.GraphQL.Definitions.getTrack, { uri });
 		const tr = data?.trackUnion;
@@ -468,25 +511,28 @@ const LIBRARY_PLUS_STRINGS = {
 	}
 
 	// ---------- library sync ----------
+	let likedSet = null; // liked uris from the last sync, so the page doesn't read Liked Songs on every load
 	async function doSync() {
 		const pl = await ensure("library", true);
-		await keepPrivate(pl);
-		const [liked, albums, later] = await Promise.all([P.LibraryAPI.getTracks({ limit: 99999 }), getAlbums(), getLater()]);
+		// everything that doesn't depend on each other runs at once
+		const privacy = Promise.all([pl, existing("later", true), existing("now", true)].map(async (u) => (await u) && keepPrivate(await u)));
+		const [liked, albums, later, have] = await Promise.all([P.LibraryAPI.getTracks({ limit: 99999 }), getAlbums(), getLater(), playlistRows(pl)]);
+		likedSet = new Set(liked.items.map((tr) => tr.uri));
 		// shortcut: local files are skipped, Spotify playlists can't hold them reliably
 		const rows = liked.items.filter((tr) => !tr.isLocal).map((tr) => ({ uri: tr.uri, t: Date.parse(tr.addedAt), i: 0 }));
-		for (const a of albums) {
+		const lists = await Promise.all(albums.map((a) => albumTracks(a.uri)));
+		albums.forEach((a, k) => {
 			const at = Date.parse(a.addedAt);
-			(await albumTracks(a.uri)).forEach((uri, i) => rows.push({ uri, t: at, i }));
-		}
+			lists[k].forEach((uri, i) => rows.push({ uri, t: at, i }));
+		});
 		rows.sort((a, b) => b.t - a.t || a.i - b.i); // newest first, album tracks in album order
 		const wanted = [...new Set(rows.map((r) => r.uri))];
 
-		const have = await contents(pl, true);
 		const excluded = getExcluded();
 		const prev = readJSON(KEY_SNAPSHOT, null);
 		const byHand = libraryPlusRemovedByHand(wanted, have, prev, excluded);
 		if (byHand.length) {
-			for (const uri of byHand) excluded[uri] = prev[uri];
+			for (const uri of byHand) excluded[uri] = asMeta(prev[uri]); // the cover and album get filled in when shown
 			S.LocalStorage.set(KEY_EXCLUDED, JSON.stringify(excluded));
 		}
 		const want = wanted.filter((uri) => !(uri in excluded));
@@ -494,14 +540,15 @@ const LIBRARY_PLUS_STRINGS = {
 		await removeRows(pl, remove);
 		// shortcut: new tracks go to the top (they are the newest); order drifts only if an old item reappears
 		await addTop(pl, add);
-		S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(Object.fromEntries((await contents(pl, true)).map((tr) => [tr.uri, meta(tr)]))));
+		const now = remove.length || add.length ? await playlistRows(pl) : have;
+		S.LocalStorage.set(KEY_SNAPSHOT, JSON.stringify(Object.fromEntries(now.map((r) => [r.uri, 1]))));
 
-		for (const kind of ["later", "now"]) {
-			const other = await existing(kind, true);
-			if (other) await keepPrivate(other);
-		}
 		const saved = new Set(albums.map((a) => a.uri));
 		for (const a of later) if (saved.has(a.uri)) await removeLater(a.uri); // saved since → it's in "Albums" now
+		await privacy;
+		// warm what the page needs, so opening it doesn't wait for a 600 ms read
+		if (!contentsCache.has(pl)) contents(pl).catch(() => {});
+		getTags().catch(() => {});
 		return { added: add.length, removed: remove.length, total: want.length };
 	}
 
@@ -687,7 +734,7 @@ const LIBRARY_PLUS_STRINGS = {
 		P.LibraryAPI._playlistDataClient.get({
 			uri: await ensure("library"),
 			policy: { track: { track: { link: true } } },
-			query: { range: { start: 0, length: 99999 }, descriptorFilter: tags },
+			query: { range: { start: 0, length: 99999 }, descriptorFilter: tags, showUnavailable: true },
 		});
 	const moodUris = async (tag) => new Set((await moodQuery([tag])).data.item.map((i) => i.trackMetadata?.link).filter(Boolean));
 
@@ -699,7 +746,7 @@ const LIBRARY_PLUS_STRINGS = {
 			getLater(),
 			getTags().catch(() => []),
 			P.SmartShuffleEligibilityAPI.getEligibility(pl).catch(() => ({})),
-			P.LibraryAPI.getTracks({ limit: 99999 }),
+			likedSet ?? P.LibraryAPI.getTracks({ limit: 99999 }).then((r) => new Set(r.items.map((tr) => tr.uri))),
 			getRemoved(),
 		]);
 		const excluded = getExcluded(); // a just-removed track hides at once, before the playlist write lands
@@ -712,7 +759,7 @@ const LIBRARY_PLUS_STRINGS = {
 			later,
 			tags,
 			canSmart: !!elig.canSmartShuffle,
-			liked: new Set(liked.items.map((tr) => tr.uri)),
+			liked,
 			removed,
 		};
 	}
