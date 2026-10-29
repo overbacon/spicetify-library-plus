@@ -336,7 +336,7 @@
 	gap: 8px;
 }
 .lp-row-later {
-	grid-template-columns: 32px 24px minmax(0, 1fr) 48px;
+	grid-template-columns: 32px 24px 40px minmax(0, 1fr) 48px;
 }
 .lp-heard {
 	color: var(--spice-button);

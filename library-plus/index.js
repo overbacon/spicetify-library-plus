@@ -259,6 +259,7 @@ function LaterAlbum({ LP, album, ver, close }) {
 					},
 					h(RowNum, { n: i + 1, t, now: now.uri === tr.uri ? now : null, label: t("playTrack", tr.name), onPlay: () => LP.playLaterFrom(album.uri, tr.uri) }),
 					h("span", { className: "lp-heard", title: d.heard[tr.uri] ? t("heardTrack") : "" }, d.heard[tr.uri] ? h(Icon, { name: "check" }) : null),
+					h("img", { src: img(album.images, "small"), alt: "", loading: "lazy" }), // the album cover, like the Tracks tab rows
 					h(
 						"div",
 						{ className: "lp-title" },
