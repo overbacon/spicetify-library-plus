@@ -363,11 +363,14 @@ function openSortPlay(uri) {
 	}, 100);
 }
 
+// The last data shown, so reopening the page draws at once and refreshes in the background
+let lastData = null;
+
 function Page({ LP }) {
 	const { t, count, state } = LP;
 	const now = usePlaying();
 	const [ver, setVer] = useState(0);
-	const [data, setData] = useState(null);
+	const [data, setData] = useState(() => lastData);
 	const [error, setError] = useState(null);
 	const [tab, setTab] = useState("tracks");
 	const [query, setQuery] = useState("");
@@ -393,7 +396,7 @@ function Page({ LP }) {
 	useEffect(() => {
 		let live = true;
 		LP.load()
-			.then((d) => live && (setData(d), setGone(new Set()), setError(null)))
+			.then((d) => ((lastData = d), live && (setData(d), setGone(new Set()), setError(null))))
 			.catch((e) => live && setError(String(e?.message ?? e)));
 		return () => {
 			live = false;
