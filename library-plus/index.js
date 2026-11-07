@@ -738,19 +738,34 @@ function Page({ LP }) {
 			? noResults
 			: h(Empty, { icon: "album", title: t(tab === "later" ? "emptyLaterTitle" : "emptyAlbumsTitle"), text: t(tab === "later" ? "emptyLater" : "emptyAlbums") });
 	} else {
-		body = h(
-			SharedMenu,
-			{
-				className: "lp-grid",
-				menuFor: (uri) => {
-					const a = shelf.find((x) => x.uri === uri);
-					const { AlbumMenu } = Spicetify.ReactComponent;
-					if (!a) return null;
-					return tab === "later" ? Menu && MenuItem && h(LaterMenu, { LP, uri, last: a.last }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: a.artists?.[0]?.uri });
+		const grid = (list) =>
+			h(
+				SharedMenu,
+				{
+					className: "lp-grid",
+					menuFor: (uri) => {
+						const a = shelf.find((x) => x.uri === uri);
+						const { AlbumMenu } = Spicetify.ReactComponent;
+						if (!a) return null;
+						return tab === "later" ? Menu && MenuItem && h(LaterMenu, { LP, uri, last: a.last }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: a.artists?.[0]?.uri });
+					},
 				},
-			},
-			shelf.map((a) => h(AlbumCard, { key: a.uri, t, onOpen: tab === "later" ? setLaterAlbum : null, onPlay: onPlayCard, ...a }))
-		);
+				list.map((a) => h(AlbumCard, { key: a.uri, t, onOpen: tab === "later" ? setLaterAlbum : null, onPlay: onPlayCard, ...a }))
+			);
+		// Listen later: albums you have started come first, in their own block, the most recently played first
+		const started = tab === "later" ? shelf.filter((a) => a.heard || a.last) : [];
+		if (!ALBUM_SORTS[albumSort]) started.sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
+		const rest = started.length ? shelf.filter((a) => !started.includes(a)) : shelf;
+		body = started.length
+			? h(
+					React.Fragment,
+					null,
+					h("h2", { className: "lp-section" }, t("laterStarted")),
+					grid(started),
+					rest.length > 0 && h("h2", { className: "lp-section" }, t("laterNew")),
+					rest.length > 0 && grid(rest)
+				)
+			: grid(shelf);
 	}
 
 	return h("section", { className: "lp-page", ref: pageRef }, header, actions, tabs, body);

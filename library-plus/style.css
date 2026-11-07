@@ -555,7 +555,8 @@
 	transform: scale(1.04) !important;
 }
 .lp-progress ~ .lp-card-play {
-	bottom: 24px;
+	z-index: 2;
+	bottom: 32px;
 }
 @media (prefers-reduced-motion: reduce) {
 	.lp-card-play {
@@ -606,13 +607,26 @@
 /* Listen later progress */
 .lp-progress {
 	position: absolute;
-	left: 8px;
-	right: 8px;
-	bottom: 16px;
-	height: 4px;
-	border-radius: 2px;
-	background: rgba(var(--spice-rgb-shadow, 0, 0, 0), 0.6);
+	z-index: 1;
+	left: 10px;
+	right: 10px;
+	bottom: 18px;
+	height: 6px;
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.3);
 	overflow: hidden;
+}
+/* dark fade at the bottom of a cover with progress, so the bar shows on any artwork */
+.lp-card-cover:has(.lp-progress)::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 8px;
+	height: 40%;
+	border-radius: 0 0 6px 6px;
+	background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+	pointer-events: none;
 }
 .lp-progress > div {
 	height: 100%;
@@ -712,4 +726,14 @@
 .lp-grid .lp-card {
 	content-visibility: auto;
 	contain-intrinsic-size: auto 230px;
+}
+
+/* block titles on the Listen later shelf */
+.lp-section {
+	margin: 8px 0 4px;
+	font-size: 22px;
+	font-weight: 700;
+}
+.lp-grid + .lp-section {
+	margin-top: 24px;
 }
