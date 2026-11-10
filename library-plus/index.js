@@ -9,6 +9,11 @@ const img = (images, label) => {
 	return (i?.url ?? "").replace("spotify:image:", "https://i.scdn.co/image/");
 };
 const time = (ms) => (ms ? `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}` : "");
+// whole album length like Spotify writes it: "47 min 12 sec", or "1 hr 5 min" from an hour up
+const albumTime = (t, ms) => {
+	const m = Math.floor(ms / 60000);
+	return m >= 60 ? t("durHours", Math.floor(m / 60), m % 60) : t("durMinutes", m, Math.floor(ms / 1000) % 60);
+};
 const names = (artists) => (artists ?? []).map((a) => a.name).join(", ");
 const cmp = (a, b) => (a ?? "").localeCompare(b ?? "", undefined, { sensitivity: "base", numeric: true });
 const SORTS = {
@@ -40,15 +45,6 @@ function usePersisted(key, initial) {
 		setValue(v);
 	};
 	return [value, set];
-}
-
-function SortSelect({ t, value, onChange, sorts }) {
-	return h(
-		"label",
-		{ className: "lp-sort lp-muted" },
-		t("sort"),
-		h("select", { value, onChange: (e) => onChange(e.target.value) }, Object.keys(sorts).map((k) => h("option", { key: k, value: k }, t(SORT_LABEL[k]))))
-	);
 }
 
 // Spicetify's "smartShuffle" is an old, different drawing; this is the 16px icon Spotify's own player shows for Smart Shuffle
@@ -149,38 +145,89 @@ class Boundary extends React.Component {
 	}
 }
 
-// Right-click → Spotify's native track / album menu (with items other extensions added, Shuffle+ included).
-// render(onContextMenu, ref) builds the trigger element.
-// menu: a ready menu element (Spotify's TrackMenu / AlbumMenu, or our own built from its Menu parts).
-function NativeMenu({ menu, render }) {
-	const { RightClickMenu } = Spicetify.ReactComponent;
-	const plain = render(undefined, undefined);
-	if (!RightClickMenu || !menu) return plain;
-	return h(Boundary, { fallback: plain }, h(RightClickMenu, { menu: h(Boundary, { fallback: null }, menu) }, (isOpen, onContextMenu, ref) => render(onContextMenu, ref)));
+// The page's own menus. Spotify 1.3.8 opens menus built from its Menu / MenuItem parts empty (and its TrackMenu not at
+// all), so only its AlbumMenu is still used; these look like Spotify's and don't depend on its internals.
+// items: [{ label, onClick, disabled, checked, divider }] (falsy entries are skipped).
+function PopMenu({ x, y, items, trigger, onClose }) {
+	const ref = useRef();
+	const [pos, setPos] = useState({ left: x, top: y, visibility: "hidden" });
+	React.useLayoutEffect(() => {
+		const r = ref.current.getBoundingClientRect();
+		setPos({ left: Math.max(8, Math.min(x, innerWidth - r.width - 8)), top: y + r.height > innerHeight - 8 ? Math.max(8, y - r.height) : y });
+		ref.current.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
+	}, []);
+	useEffect(() => {
+		const away = (e) => !ref.current?.contains(e.target) && !trigger?.contains(e.target) && onClose();
+		const keys = (e) => {
+			if (e.key === "Escape") return e.stopPropagation(), onClose(), trigger?.focus();
+			if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+			e.preventDefault();
+			const list = [...ref.current.querySelectorAll("button:not(:disabled)")];
+			const i = list.indexOf(document.activeElement);
+			list[(i + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length]?.focus();
+		};
+		const scroll = (e) => !ref.current?.contains(e.target) && onClose();
+		document.addEventListener("mousedown", away, true);
+		document.addEventListener("keydown", keys, true);
+		document.addEventListener("scroll", scroll, true);
+		window.addEventListener("blur", onClose);
+		return () => {
+			document.removeEventListener("mousedown", away, true);
+			document.removeEventListener("keydown", keys, true);
+			document.removeEventListener("scroll", scroll, true);
+			window.removeEventListener("blur", onClose);
+		};
+	}, []);
+	return Spicetify.ReactDOM.createPortal(
+		h(
+			"div",
+			{ ref, className: "lp-menu", role: "menu", style: pos, onContextMenu: (e) => e.preventDefault() },
+			items.filter(Boolean).map((it, i) =>
+				h(
+					"button",
+					{
+						key: i,
+						role: it.checked === undefined ? "menuitem" : "menuitemradio",
+						"aria-checked": it.checked,
+						className: `lp-menu-item ${it.checked ? "is-checked" : ""} ${it.divider ? "has-divider" : ""}`,
+						disabled: it.disabled,
+						onClick: () => (onClose(), it.onClick()),
+					},
+					h("span", null, it.label),
+					it.checked && h(Icon, { name: "check" })
+				)
+			)
+		),
+		document.body
+	);
 }
 
-// A Spotify menu opened by a left click (the "…" and sort buttons). fallback is shown if Spotify lacks the parts.
-function ClickMenu({ menu, render, fallback }) {
-	const { ContextMenu } = Spicetify.ReactComponent;
-	if (!ContextMenu) return fallback;
-	return h(Boundary, { fallback }, h(ContextMenu, { trigger: "click", menu: h(Boundary, { fallback: null }, menu) }, (isOpen, onClick, ref) => render(onClick, ref)));
+// [open(event, items), element]: open() shows the menu at the mouse (right-click) or under the button (click, keyboard);
+// opening it again from the same button closes it.
+function useMenu() {
+	const [m, setM] = useState(null);
+	const open = useCallback((e, items) => {
+		e.preventDefault();
+		const trigger = e.currentTarget;
+		const r = (e.type === "contextmenu" && e.target.closest?.("[data-menu]")) || trigger;
+		const box = r.getBoundingClientRect();
+		const atMouse = e.type === "contextmenu" && e.clientX;
+		setM((cur) => (cur && cur.trigger === trigger && e.type === "click" ? null : { trigger, items, x: atMouse ? e.clientX : box.left, y: atMouse ? e.clientY : box.bottom + 4 }));
+	}, []);
+	return [open, m && h(PopMenu, { ...m, onClose: () => setM(null) })];
 }
 
 // Spotify-style sort button: the current sorting as text, a menu with the choices and a check on the current one.
 function SortMenu({ t, value, onChange, sorts }) {
-	const { Menu, MenuItem } = Spicetify.ReactComponent;
-	const select = h(SortSelect, { t, value, onChange, sorts });
-	if (!Menu || !MenuItem) return select;
+	const [open, menu] = useMenu();
 	const label = t(SORT_LABEL[value] ?? "sortAdded");
-	return h(ClickMenu, {
-		fallback: select,
-		menu: h(
-			Menu,
-			null,
-			Object.keys(sorts).map((k) => h(MenuItem, { key: k, onClick: () => onChange(k), trailingIcon: k === value ? h(Icon, { name: "check" }) : undefined }, t(SORT_LABEL[k])))
-		),
-		render: (onClick, ref) => h("button", { ref, className: "lp-sortbtn", onClick, title: t("sortBy", label), "aria-label": t("sortBy", label) }, h("span", null, label), h(Icon, { name: "list-view" })),
-	});
+	const items = Object.keys(sorts).map((k) => ({ label: t(SORT_LABEL[k]), checked: k === value, onClick: () => onChange(k) }));
+	return h(
+		React.Fragment,
+		null,
+		h("button", { className: "lp-sortbtn", onClick: (e) => open(e, items), title: t("sortBy", label), "aria-label": t("sortBy", label), "aria-haspopup": "menu" }, h("span", null, label), h(Icon, { name: "list-view" })),
+		menu
+	);
 }
 
 // Spotify-style search: a magnifier that opens into a field, closes again when left empty.
@@ -237,44 +284,55 @@ function MoodRow({ t, label, children }) {
 }
 
 // One right-click menu for a whole list instead of one per row (200 rows each with their own menu took ~0.1 s to draw).
-// Spotify's handler accepts the menu to open as its 2nd argument; the row is found by its data-menu key.
+// The row is found by its data-menu key. menuFor(key) returns our menu items, or a Spotify menu element (AlbumMenu),
+// which Spotify's handler opens when given as its 2nd argument.
 function SharedMenu({ className, menuFor, children }) {
 	const { RightClickMenu } = Spicetify.ReactComponent;
+	const [open, menu] = useMenu();
 	const box = (onContextMenu, ref) =>
 		h(
 			"div",
 			{
 				className,
 				ref,
-				onContextMenu:
-					onContextMenu &&
-					((e) => {
-						const key = e.target.closest("[data-menu]")?.dataset.menu;
-						const menu = key && menuFor(key);
-						if (menu) onContextMenu(e, h(Boundary, { fallback: null }, menu));
-					}),
+				onContextMenu: (e) => {
+					const key = e.target.closest("[data-menu]")?.dataset.menu;
+					const m = key && menuFor(key);
+					if (Array.isArray(m)) open(e, m);
+					else if (m && onContextMenu) onContextMenu(e, h(Boundary, { fallback: null }, m));
+				},
 			},
-			children
+			children,
+			menu
 		);
 	if (!RightClickMenu) return box();
 	return h(Boundary, { fallback: box() }, h(RightClickMenu, { menu: h("div") }, (isOpen, onContextMenu, ref) => box(onContextMenu, ref)));
 }
 
-// Spotify's own menu for an album of the later shelf would lack our actions (Spicetify only adds extension items to
-// menus Spotify opens itself), so this one is built from Spotify's Menu parts and looks the same.
-function LaterMenu({ LP, uri, last }) {
-	const { Menu, MenuItem } = Spicetify.ReactComponent;
-	const { t } = LP;
-	return h(
-		Menu,
-		null,
-		last && h(MenuItem, { onClick: () => LP.playLaterFrom(uri, last.uri, last.pos) }, t("resume", "")),
-		h(MenuItem, { onClick: () => LP.playUri(uri) }, t(last ? "fromStart" : "playAlbum")),
-		last && h(MenuItem, { onClick: () => LP.resetLaterProgress(uri) }, t("resetProgress")),
-		h(MenuItem, { onClick: () => LP.toAlbums(uri) }, t("toAlbums")),
-		h(MenuItem, { onClick: () => LP.removeLater(uri) }, t("removeLater")),
-		h(MenuItem, { onClick: () => go(uri) }, t("openAlbum"))
-	);
+// Menu of an album on the Listen later shelf.
+const laterItems = (LP, uri, last) => [
+	last && { label: LP.t("resume", "").replace(/[:\s]+$/, ""), onClick: () => LP.playLaterFrom(uri, last.uri, last.pos) },
+	{ label: LP.t(last ? "fromStart" : "playAlbum"), onClick: () => LP.playUri(uri) },
+	last && { label: LP.t("resetProgress"), onClick: () => LP.resetLaterProgress(uri) },
+	{ label: LP.t("toAlbums"), onClick: () => LP.toAlbums(uri), divider: true },
+	{ label: LP.t("removeLater"), onClick: () => LP.removeLater(uri) },
+	{ label: LP.t("openAlbum"), onClick: () => go(uri), divider: true },
+];
+
+// Menu of a track row. play(uri) plays from it; exclude is given on the Tracks tab only.
+function trackItems(LP, liked, { uri, artists, album }, play, exclude) {
+	const P = Spicetify.Platform;
+	const isLiked = liked?.has(uri);
+	const link = `https://open.spotify.com/track/${uri.split(":")[2]}`;
+	return [
+		{ label: LP.t("playAlbum"), onClick: () => play(uri) },
+		{ label: LP.t("addToQueue"), onClick: () => P.PlayerAPI.addToQueue([{ uri }]).then(() => Spicetify.showNotification(LP.t("addedToQueue"))) },
+		{ label: LP.t(isLiked ? "unlike" : "like"), onClick: () => P.LibraryAPI[isLiked ? "remove" : "add"]({ uris: [uri] }), divider: true },
+		exclude && { label: LP.t("excludeTrack"), onClick: exclude },
+		artists?.[0]?.uri && { label: LP.t("goArtist"), onClick: () => go(artists[0].uri), divider: true },
+		album?.uri && { label: LP.t("openAlbum"), onClick: () => go(album.uri) },
+		{ label: LP.t("copyLink"), onClick: () => (P.ClipboardAPI?.copy(link) ?? navigator.clipboard.writeText(link)).then?.(() => Spicetify.showNotification(LP.t("linkCopied"))), divider: true },
+	];
 }
 
 // Spotify-style album tile: cover, title, "Single • artist", a round ▶ on hover. Click opens it, right-click for the menu.
@@ -355,19 +413,24 @@ function TrackHead({ t, sort, setSort }) {
 	);
 }
 
-// Header of an album opened inside a tab: back, title, a line under it, actions on the right.
-function SubHead({ t, close, title, sub, children }) {
+// Header of an album opened inside a tab: back, title (opens the album in Spotify when uri is given), a line under it,
+// actions on the right.
+function SubHead({ t, close, title, uri, sub, children }) {
 	return h(
 		"div",
 		{ className: "lp-subhead" },
 		h(BackBtn, { t, onClick: close }),
-		h("div", { className: "lp-subhead-text" }, h("span", { className: "lp-removed-title" }, title), sub && h("span", { className: "lp-muted" }, sub)),
+		h(
+			"div",
+			{ className: "lp-subhead-text" },
+			uri ? h("button", { className: "lp-removed-title lp-title-link", onClick: () => go(uri), title: t("openAlbum") }, title) : h("span", { className: "lp-removed-title" }, title),
+			sub && h("span", { className: "lp-muted" }, sub)),
 		h("div", { className: "lp-push lp-later-actions" }, children)
 	);
 }
 
 // Listen later album view: every track with a mark for listened ones and for where you stopped, plus Continue.
-function LaterAlbum({ LP, album, ver, close }) {
+function LaterAlbum({ LP, album, ver, close, liked }) {
 	const { t } = LP;
 	const now = usePlaying();
 	const [d, setD] = useState(null);
@@ -385,7 +448,7 @@ function LaterAlbum({ LP, album, ver, close }) {
 		null,
 		h(
 			SubHead,
-			{ t, close, title: album.name, sub: [names(album.artists), d && t("heardOf", heard, d.tracks.length)].filter(Boolean).join(" · ") },
+			{ t, close, title: album.name, uri: album.uri, sub: [names(album.artists), d && albumTime(t, d.tracks.reduce((n, tr) => n + (tr.duration ?? 0), 0)), d && t("heardOf", heard, d.tracks.length)].filter(Boolean).join(" · ") },
 			lastTrack
 				? h(Btn, { icon: "play", className: "is-primary", label: t("resume", `${lastTrack.name} (${time(d.last.pos) || "0:00"})`), onClick: () => LP.playLaterFrom(album.uri, d.last.uri, d.last.pos) })
 				: h(Btn, { icon: "play", className: "is-primary", label: t("playAlbum"), onClick: () => d?.tracks[0] && LP.playLaterFrom(album.uri, d.tracks[0].uri) }),
@@ -393,13 +456,17 @@ function LaterAlbum({ LP, album, ver, close }) {
 			d?.last && h(Btn, { label: t("resetProgress"), onClick: () => LP.resetLaterProgress(album.uri) })
 		),
 		h(
-			"div",
-			{ className: "lp-list" },
+			SharedMenu,
+			{
+				className: "lp-list",
+				menuFor: (uri) => trackItems(LP, liked, { uri, album }, (u) => LP.playLaterFrom(album.uri, u)),
+			},
 			(d?.tracks ?? []).map((tr, i) =>
 				h(
 					"div",
 					{
 						key: tr.uri,
+						"data-menu": tr.uri,
 						className: `lp-row lp-row-later ${d.heard[tr.uri] ? "is-heard" : ""} ${tr.playable ? "" : "is-disabled"} ${now.uri === tr.uri ? "is-playing" : ""}`,
 						role: "button",
 						tabIndex: 0,
@@ -437,7 +504,6 @@ const cover = (url) => (url ?? "").replace("spotify:image:", "https://i.scdn.co/
 
 function RemovedTab({ LP, groups, open, setOpen, restore }) {
 	const { t, count } = LP;
-	const { Menu, MenuItem } = Spicetify.ReactComponent;
 	const all = groups.flatMap((g) => g.items.map((it) => it.uri));
 	if (!all.length) return h(Empty, { icon: "x", title: t("nothingRemoved"), text: t("removeHint") });
 	if (!open)
@@ -451,24 +517,22 @@ function RemovedTab({ LP, groups, open, setOpen, restore }) {
 				all.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => restore(all), className: "lp-push" })
 			),
 			h(
-				"div",
-				{ className: "lp-grid" },
+				SharedMenu,
+				{
+					className: "lp-grid",
+					menuFor: (key) => {
+						const g = groups.find((x) => (x.key || "-") === key);
+						return g && [{ label: t("bringBackAlbum"), onClick: () => restore(g.items.map((it) => it.uri)) }, g.key && { label: t("openAlbum"), onClick: () => go(g.key) }];
+					},
+				},
 				groups.map((g) =>
-					h(NativeMenu, {
-						key: g.key,
-						menu:
-							Menu &&
-							MenuItem &&
-							h(Menu, null, h(MenuItem, { onClick: () => restore(g.items.map((it) => it.uri)) }, t("bringBackAlbum")), g.key && h(MenuItem, { onClick: () => go(g.key) }, t("openAlbum"))),
-						render: (onContextMenu, ref) =>
-							h(
-								"div",
-								{ className: "lp-card", onContextMenu, ref, role: "button", tabIndex: 0, onClick: () => setOpen(g.key), onKeyDown: (e) => e.key === "Enter" && setOpen(g.key) },
-								g.image ? h("img", { src: cover(g.image), alt: "", loading: "lazy" }) : h("div", { className: "lp-card-blank" }, h(Icon, { name: "album", size: 48 })),
-								h("div", { className: "lp-card-name", title: g.name }, g.name || t("otherAlbum")),
-								h("div", { className: "lp-card-artist" }, [g.artist, count(g.items.length, "tracks")].filter(Boolean).join(" • "))
-							),
-					})
+					h(
+						"div",
+						{ key: g.key, "data-menu": g.key || "-", className: "lp-card", role: "button", tabIndex: 0, onClick: () => setOpen(g.key), onKeyDown: (e) => e.key === "Enter" && setOpen(g.key) },
+						g.image ? h("img", { src: cover(g.image), alt: "", loading: "lazy" }) : h("div", { className: "lp-card-blank" }, h(Icon, { name: "album", size: 48 })),
+						h("div", { className: "lp-card-name", title: g.name }, g.name || t("otherAlbum")),
+						h("div", { className: "lp-card-artist" }, [g.artist, count(g.items.length, "tracks")].filter(Boolean).join(" • "))
+					)
 				)
 			)
 		);
@@ -477,7 +541,7 @@ function RemovedTab({ LP, groups, open, setOpen, restore }) {
 		null,
 		h(
 			SubHead,
-			{ t, close: () => setOpen(null), title: open.name || t("otherAlbum"), sub: open.artist },
+			{ t, close: () => setOpen(null), title: open.name || t("otherAlbum"), uri: open.key || undefined, sub: open.artist },
 			open.items.length > 1 && h(Btn, { label: t("bringBackAll"), onClick: () => restore(open.items.map((it) => it.uri)) })
 		),
 		h(
@@ -535,6 +599,7 @@ function Page({ LP }) {
 	const [removedAlbum, setRemovedAlbum] = useState(null); // album opened inside the Removed tab
 	const [laterAlbum, setLaterAlbum] = useState(null); // album opened inside the Listen later tab
 	const [noLikedFlag, setNoLikedFlag] = usePersisted("no-liked", "0");
+	const [openMenu, menuEl] = useMenu(); // the "…" menu
 	const orderedRef = useRef(); // what "in order" plays right now, read by the rows' stable callbacks
 	const onPlayRow = useCallback((uri) => LP.play("order", orderedRef.current, uri), []);
 	const onExcludeRow = useCallback((tr) => (setGone((g) => new Set(g).add(tr.uri)), LP.excludeTrack(tr)), []);
@@ -657,12 +722,11 @@ function Page({ LP }) {
 		)
 	);
 
-	const { Menu, MenuItem } = Spicetify.ReactComponent;
 	const moreItems = [
-		[t("openPlaylist"), () => go(data.playlist)],
-		hasSortPlay() && [t("sortPlayMenu"), () => openSortPlay(tab === "later" && data.laterPlaylist ? data.laterPlaylist : data.playlist)],
-		[t("syncNow"), () => LP.sync(), state.syncing],
-	].filter(Boolean);
+		{ label: t("openPlaylist"), onClick: () => go(data.playlist) },
+		hasSortPlay() && { label: t("sortPlayMenu"), onClick: () => openSortPlay(tab === "later" && data.laterPlaylist ? data.laterPlaylist : data.playlist) },
+		{ label: t("syncNow"), onClick: () => LP.sync(), disabled: state.syncing },
+	];
 	const modeTip = t("modeTitle", t(MODE_LABEL[mode]));
 	const playTip = t("playWhat", what) + (mode === "order" ? "" : ` · ${t(MODE_LABEL[mode])}`);
 	const sortFor = tab === "tracks" ? [sort, setSort, SORTS] : shelf && !laterOpen ? [albumSort, setAlbumSort, ALBUM_SORTS] : null;
@@ -676,13 +740,8 @@ function Page({ LP }) {
 			h(Icon, { name: MODE_ICON[mode], size: 24 }),
 			mode === "shuffle+" && h("b", { className: "lp-mode-plus", "aria-hidden": true }, "+")
 		),
-		Menu &&
-			MenuItem &&
-			h(ClickMenu, {
-				menu: h(Menu, null, moreItems.map(([label, f, off]) => h(MenuItem, { key: label, onClick: f, disabled: off }, label))),
-				fallback: moreItems.map(([label, f, off]) => h(Btn, { key: label, label, onClick: f, disabled: off })),
-				render: (onClick, ref) => h("button", { ref, className: "lp-icon-btn", onClick, title: t("moreActions"), "aria-label": t("moreActions") }, h(Icon, { name: "more", size: 24 })),
-			}),
+		h("button", { className: "lp-icon-btn", onClick: (e) => openMenu(e, moreItems), title: t("moreActions"), "aria-label": t("moreActions"), "aria-haspopup": "menu" }, h(Icon, { name: "more", size: 24 })),
+		menuEl,
 		h(Btn, { icon: "heart", label: t("noLiked"), title: t("noLikedTitle"), onClick: () => setNoLikedFlag(noLiked ? "0" : "1"), pressed: noLiked, className: "lp-push" }),
 		h(SearchBox, { t, value: query, onChange: setQuery }),
 		sortFor && h(SortMenu, { t, value: sortFor[0], onChange: sortFor[1], sorts: sortFor[2] })
@@ -717,11 +776,9 @@ function Page({ LP }) {
 			);
 		const shown = tracks.slice(0, Math.min(limit, paint));
 		const rows = shown.map((tr, i) => h(TrackRow, { key: tr.uid || tr.uri, tr, i, t, now: now.uri === tr.uri ? now : null, onPlay: onPlayRow, onExclude: onExcludeRow }));
-		// saveTrackUri unlocks "Add to playlist" / "Save to Liked Songs"; no uid, so no "Remove" (sync would undo it)
 		const trackMenu = (key) => {
 			const tr = shown.find((x) => (x.uid || x.uri) === key);
-			const TrackMenu = Spicetify.ReactComponent.TrackMenu;
-			return tr && TrackMenu && h(TrackMenu, { uri: tr.uri, saveTrackUri: tr.uri, artists: tr.artists, albumUri: tr.album?.uri });
+			return tr && trackItems(LP, data.liked, tr, onPlayRow, () => onExcludeRow(tr));
 		};
 		body = h(
 			React.Fragment,
@@ -735,7 +792,7 @@ function Page({ LP }) {
 			tracks.length > limit && h(Btn, { label: t("more", tracks.length - limit), onClick: () => setLimit(limit + 200), className: "lp-more" })
 		);
 	} else if (laterOpen) {
-		body = h(LaterAlbum, { LP, album: laterOpen, ver, close: () => setLaterAlbum(null) });
+		body = h(LaterAlbum, { LP, album: laterOpen, ver, liked: data.liked, close: () => setLaterAlbum(null) });
 	} else if (tab === "removed") {
 		body = h(RemovedTab, { LP, groups: removedGroups, open: removedOpen, setOpen: setRemovedAlbum, restore });
 	} else if (!shelf.length) {
@@ -753,7 +810,7 @@ function Page({ LP }) {
 						const a = shelf.find((x) => x.uri === uri);
 						const { AlbumMenu } = Spicetify.ReactComponent;
 						if (!a) return null;
-						return tab === "later" ? Menu && MenuItem && h(LaterMenu, { LP, uri, last: a.last }) : AlbumMenu && h(AlbumMenu, { uri, artistUri: a.artists?.[0]?.uri });
+						return tab === "later" ? laterItems(LP, uri, a.last) : AlbumMenu && h(AlbumMenu, { uri, artistUri: a.artists?.[0]?.uri });
 					},
 				},
 				list.map((a) => h(AlbumCard, { key: a.uri, t, onOpen: tab === "later" ? setLaterAlbum : null, onPlay: onPlayCard, ...a }))

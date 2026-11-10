@@ -14,7 +14,7 @@ Your whole Spotify library as one playlist.
   - sorting by date added, title, artist, album or duration (albums: date added, title or artist), from the sort button or by clicking a column title. Sorting is remembered;
   - the × on a track row takes it out of My Library (the like and the album stay). Tracks you delete from the playlist in Spotify itself stay out too, instead of coming back at the next sync. They show up in a **Removed** tab, grouped by album like the Albums tab; open an album to see and bring back just the tracks removed from it;
   - **No Liked Songs** toggle: hides your liked tracks and skips them on every tab, so you hear only what you haven't liked yet. It stays on until you switch it off;
-  - right-click a track or album for Spotify's own menu.
+  - right-click for a menu: Spotify's own one on saved albums; on tracks and the other tiles a Library+ menu (play, add to queue, like, go to artist / album, copy link). Spotify 1.3.8 no longer opens its track menu for extensions.
 
   ▶ plays what the open tab shows: the library, the filtered or sorted list, or the albums on a shelf. Smart Shuffle works everywhere too. A list that isn't a whole playlist is written into a third private playlist, “Library+ · Now Playing”, and played from there. Library+ pins it after your own pins and gives it a fixed cover, so it doesn't jump around the sidebar.
 - **Album shelves.** “Albums” = your saved albums; their tracks are part of the library. “Listen later” = albums put aside for later. They are not played with the library and live in a second private playlist, so you see them on your phone too. Albums are shown as Spotify-style tiles: click to open, ▶ on hover to play, right-click for the menu. Listen later keeps track of what you've heard: albums you have started come first, under “Continue listening”; each tile shows a progress bar and “5 of 12”, and opening it lists the tracks with a mark for the listened ones and for where you stopped, plus **Continue** from that spot. Albums stay on the shelf until you move them.
@@ -54,7 +54,7 @@ spicetify apply
 
 **По-русски.** Вся библиотека как один закрытый плейлист «Моя библиотека» (лайки + сохранённые альбомы, синхронизируется сам). На странице Library+ есть:
 - страница как плейлист Spotify: большая ▶ и одна кнопка перемешивания (выкл / перемешать / умное / Shuffle+), остальное в меню «…»; ▶ играет то, что открыто во вкладке;
-- поиск, фильтры настроений, сортировка, родное меню по правому клику;
+- поиск, фильтры настроений, сортировка, меню по правому клику на треках и альбомах;
 - переключатель «Без любимых»: лайкнутые треки скрыты и не играют ни на одной вкладке;
 - альбомы плитками, как в Spotify, с сортировкой; крестик в строке убирает трек из «Моей библиотеки», удалённые прямо в Spotify тоже не возвращаются, а вернуть их можно на вкладке «Убранные» (по альбомам);
 - полки альбомов «Альбомы» и «Послушать позже»; на «Послушать позже» начатые альбомы идут первыми, видно, сколько прослушано, какие треки и где вы остановились, и есть «Продолжить».
